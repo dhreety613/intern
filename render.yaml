@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: pipedrive-history-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn fetch:app --host 0.0.0.0 --port $PORT
