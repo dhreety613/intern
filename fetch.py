@@ -3,7 +3,7 @@ import json
 from bs4 import BeautifulSoup
 from html import unescape
 from datetime import datetime
-
+import os
 
 class PipedriveDealHistoryFetcher:
     
@@ -580,7 +580,7 @@ from pydantic import BaseModel
 app = FastAPI()
 
 DOMAIN = "tensitron"
-API_TOKEN = "e2e013bd6347cf567d9328bc9cbcacc70b687001"
+API_TOKEN = os.getenv("PIPEDRIVE_TOKEN")
 
 
 class DealRequest(BaseModel):
