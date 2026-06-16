@@ -94,7 +94,7 @@ class PipedriveDealHistoryFetcher:
 
         results = []
 
-        for a in data.get("data", []):
+        for a in (data.get("data") or []):
 
             results.append({
 
@@ -139,7 +139,7 @@ class PipedriveDealHistoryFetcher:
 
         notes = []
 
-        for n in data.get("data", []):
+        for n in (data.get("data") or []):
 
             notes.append({
 
@@ -178,7 +178,7 @@ class PipedriveDealHistoryFetcher:
 
         emails = []
 
-        for item in data.get("data", []):
+        for item in (data.get("data") or []):
 
             if item.get("object") != "mailMessage":
                 continue
