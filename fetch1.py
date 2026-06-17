@@ -661,25 +661,81 @@ class PipedriveDealHistoryFetcher:
 DOMAIN = "tensitron"
 API_TOKEN = os.getenv("PIPEDRIVE_TOKEN")
 
+def date_only(value):
+
+    if not value:
+        return None
+
+    return str(value)[:10]
+
+
 def run_fetch(deal_id):
-    
+
     fetcher = PipedriveDealHistoryFetcher(
         DOMAIN,
         API_TOKEN
     )
 
-    history = fetcher.fetch_history(deal_id)
+    history = fetcher.fetch_history(
+        deal_id
+    )
 
     latest_dates = {
-        ...
+
+        "latest_call_date":
+            date_only(
+                history["latest_call"]["date"]
+            ) if history["latest_call"] else None,
+
+        "latest_call_id":
+            history["latest_call"]["activity_id"]
+            if history["latest_call"] else None,
+
+        "latest_email_date":
+            date_only(
+                history["latest_email"]["created_at"]
+            ) if history["latest_email"] else None,
+
+        "latest_email_id":
+            history["latest_email"]["id"]
+            if history["latest_email"] else None,
+
+        "latest_note_date":
+            date_only(
+                history["latest_note"]["updated_at"]
+            ) if history["latest_note"] else None,
+
+        "latest_note_id":
+            history["latest_note"]["id"]
+            if history["latest_note"] else None,
+
+        "latest_activity_date":
+            date_only(
+                history["latest_activity"]["updated_at"]
+            ) if history["latest_activity"] else None,
+
+        "latest_activity_id":
+            history["latest_activity"]["id"]
+            if history["latest_activity"] else None
     }
 
     return {
-        "deal_id": deal_id,
-        "latest_dates": latest_dates,
+
+        "deal_id":
+            deal_id,
+
+        "latest_dates":
+            latest_dates,
+
         "history": {
-            "activities": history["activities"],
-            "notes": history["notes"],
-            "emails": history["emails"]
+
+            "activities":
+                history["activities"],
+
+            "notes":
+                history["notes"],
+
+            "emails":
+                history["emails"]
         }
     }

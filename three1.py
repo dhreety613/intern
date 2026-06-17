@@ -658,28 +658,16 @@ class PipedriveDealHistoryFetcher:
 # TEST
 # =====================================================
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-#app = FastAPI()
-
 DOMAIN = "tensitron"
 API_TOKEN = os.getenv("PIPEDRIVE_TOKEN")
 
-
-class DealRequest(BaseModel):
-    deal_id: int
-
-    latest_call_date: str | None = None
-    latest_email_date: str | None = None
-    latest_note_date: str | None = None
-    latest_activity_date: str | None = None
-    
-
-
-
-#@app.post("/deal-history")
-def deal_history(request: DealRequest):
+def run_delta(
+    deal_id,
+    latest_call_date,
+    latest_email_date,
+    latest_note_date,
+    latest_activity_date
+):
 
     fetcher = PipedriveDealHistoryFetcher(
         DOMAIN,
@@ -687,39 +675,42 @@ def deal_history(request: DealRequest):
     )
 
     history = fetcher.fetch_history(
-         request.deal_id,
-        request.latest_call_date,
-        request.latest_email_date,
-        request.latest_note_date,
-        request.latest_activity_date
-
+        deal_id,
+        latest_call_date,
+        latest_email_date,
+        latest_note_date,
+        latest_activity_date
     )
 
     latest_dates = {
 
         "latest_call_date":
-    history["latest_call"]["date"] if history["latest_call"] else None,
+            history["latest_call"]["date"]
+            if history["latest_call"] else None,
 
         "latest_call_id":
             history["latest_call"]["activity_id"]
             if history["latest_call"] else None,
 
         "latest_email_date":
-            history["latest_email"]["created_at"] if history["latest_email"] else None,
+            history["latest_email"]["created_at"]
+            if history["latest_email"] else None,
 
         "latest_email_id":
             history["latest_email"]["id"]
             if history["latest_email"] else None,
 
         "latest_note_date":
-            history["latest_note"]["updated_at"] if history["latest_note"] else None,
+            history["latest_note"]["updated_at"]
+            if history["latest_note"] else None,
 
         "latest_note_id":
             history["latest_note"]["id"]
             if history["latest_note"] else None,
 
         "latest_activity_date":
-            history["latest_activity"]["updated_at"] if history["latest_activity"] else None,
+            history["latest_activity"]["updated_at"]
+            if history["latest_activity"] else None,
 
         "latest_activity_id":
             history["latest_activity"]["id"]
@@ -729,7 +720,7 @@ def deal_history(request: DealRequest):
     return {
 
         "deal_id":
-            request.deal_id,
+            deal_id,
 
         "latest_dates":
             latest_dates,
