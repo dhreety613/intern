@@ -79,6 +79,35 @@ class PipedriveDealHistoryFetcher:
             pass
 
         return None
+    
+    @staticmethod
+    def filter_after(items, field_name, cutoff):
+
+        if not cutoff:
+            return items
+
+        cutoff_dt = PipedriveDealHistoryFetcher.parse_date(
+            cutoff
+    )
+
+        if not cutoff_dt:
+            return items
+
+        filtered = []
+
+        for item in items:
+
+            item_dt = PipedriveDealHistoryFetcher.parse_date(
+                item.get(field_name)
+        )
+
+            if (
+                item_dt
+                and item_dt > cutoff_dt
+            ):
+                filtered.append(item)
+
+        return filtered
 
     # =====================================================
     # ACTIVITIES
@@ -250,48 +279,79 @@ class PipedriveDealHistoryFetcher:
     # EMAILS
     # =====================================================
 
-    def get_emails(self, deal_id):
+    def get_emails(
+            self,
+        deal_id,
+        latest_email_date=None
+):
 
         headers = self.get_email_messages(
             deal_id
+    )
+
+        cutoff_dt = self.parse_date(
+            latest_email_date
+    )
+
+        filtered_headers = []
+
+        for email in headers:
+
+            msg_time = email.get(
+                "message_time"
+        )
+
+            msg_dt = self.parse_date(
+                msg_time
+        )
+
+            if (
+                cutoff_dt
+                and msg_dt
+                and msg_dt <= cutoff_dt
+        ):
+                continue
+
+            filtered_headers.append(
+                email
         )
 
         emails = []
 
-        total = len(headers)
+        total = len(
+            filtered_headers
+    )
 
-        print("\nSTEP 4 - EMAIL DETAILS + BODIES")
+        print(
+            f"\nSTEP 4 - FETCHING {total} NEW EMAILS"
+    )
 
         for i, email in enumerate(
-            headers,
+            filtered_headers,
             start=1
-        ):
+    ):
 
             msg_id = email.get("id")
 
             print(
                 f"[{i}/{total}] Email ID {msg_id}"
-            )
+        )
 
             details = self.get_email_details(
                 msg_id
-            )
+        )
 
             body = ""
 
             if details.get(
                 "has_body_flag"
-            ):
-
-                print(
-                    "    downloading body..."
-                )
+        ):
 
                 body = self.fetch_email_body(
                     details.get(
                         "body_url"
-                    )
                 )
+            )
 
             emails.append({
 
@@ -301,13 +361,17 @@ class PipedriveDealHistoryFetcher:
                 "thread_id":
                     details.get(
                         "mail_thread_id"
-                    ),
+                ),
 
                 "subject":
-                    details.get("subject"),
+                    details.get(
+                        "subject"
+                ),
 
                 "snippet":
-                    details.get("snippet"),
+                    details.get(
+                        "snippet"
+                ),
 
                 "body":
                     body,
@@ -316,26 +380,25 @@ class PipedriveDealHistoryFetcher:
                     details.get(
                         "from",
                         []
-                    ),
+                ),
 
                 "to":
                     details.get(
                         "to",
                         []
-                    ),
+                ),
 
                 "created_at":
                     details.get(
                         "message_time"
-                    )
-            })
+                )
+        })
 
         print(
             f"\nEmails fetched: {len(emails)}"
-        )
+    )
 
         return emails
-
     # =====================================================
     # LATEST CALL
     # =====================================================
@@ -520,20 +583,41 @@ class PipedriveDealHistoryFetcher:
     # MASTER
     # =====================================================
 
-    def fetch_history(self, deal_id):
+    def fetch_history(
+    self,
+    deal_id,
+    latest_call_date=None,
+    latest_email_date=None,
+    latest_note_date=None,
+    latest_activity_date=None
+):
 
         activities = self.get_activities(
             deal_id
-        )
+    )
 
         notes = self.get_notes(
             deal_id
-        )
+    )
 
         emails = self.get_emails(
-            deal_id
-        )
+    deal_id,
+    latest_email_date
+)
 
+        activities = self.filter_after(
+            activities,
+            "updated_at",
+            latest_activity_date
+    )
+
+        notes = self.filter_after(
+            notes,
+            "updated_at",
+            latest_note_date
+    )
+
+        
         return {
 
             "deal_id":
@@ -574,95 +658,28 @@ class PipedriveDealHistoryFetcher:
 # TEST
 # =====================================================
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-
-app = FastAPI()
-
 DOMAIN = "tensitron"
 API_TOKEN = os.getenv("PIPEDRIVE_TOKEN")
 
-
-class DealRequest(BaseModel):
-    deal_id: int
-
-
-def date_only(value):
-
-    if not value:
-        return None
-
-    return str(value)[:10]
-
-
-@app.post("/deal-history")
-def deal_history(request: DealRequest):
-
+def run_fetch(deal_id):
+    
     fetcher = PipedriveDealHistoryFetcher(
         DOMAIN,
         API_TOKEN
     )
 
-    history = fetcher.fetch_history(
-        request.deal_id
-    )
+    history = fetcher.fetch_history(deal_id)
 
     latest_dates = {
-
-        "latest_call_date":
-            date_only(
-                history["latest_call"]["date"]
-            ) if history["latest_call"] else None,
-
-        "latest_call_id":
-            history["latest_call"]["activity_id"]
-            if history["latest_call"] else None,
-
-        "latest_email_date":
-            date_only(
-                history["latest_email"]["created_at"]
-            ) if history["latest_email"] else None,
-
-        "latest_email_id":
-            history["latest_email"]["id"]
-            if history["latest_email"] else None,
-
-        "latest_note_date":
-            date_only(
-                history["latest_note"]["updated_at"]
-            ) if history["latest_note"] else None,
-
-        "latest_note_id":
-            history["latest_note"]["id"]
-            if history["latest_note"] else None,
-
-        "latest_activity_date":
-            date_only(
-                history["latest_activity"]["updated_at"]
-            ) if history["latest_activity"] else None,
-
-        "latest_activity_id":
-            history["latest_activity"]["id"]
-            if history["latest_activity"] else None
+        ...
     }
 
     return {
-
-        "deal_id":
-            request.deal_id,
-
-        "latest_dates":
-            latest_dates,
-
+        "deal_id": deal_id,
+        "latest_dates": latest_dates,
         "history": {
-
-            "activities":
-                history["activities"],
-
-            "notes":
-                history["notes"],
-
-            "emails":
-                history["emails"]
+            "activities": history["activities"],
+            "notes": history["notes"],
+            "emails": history["emails"]
         }
     }
