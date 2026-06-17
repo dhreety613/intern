@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from fetch import deal_history as full_deal_history
-from three import deal_history as delta_deal_history
+from fetch1 import deal_history as full_deal_history
+from three1 import deal_history as delta_deal_history
 
 app = FastAPI()
 
