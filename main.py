@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-from fetch1 import fetch_history as full_deal_history
-from three1 import fetch_history as delta_deal_history
+from fetch1 import run_fetch
+from three1 import run_delta
 
 app = FastAPI()
 
@@ -21,9 +21,31 @@ class DeltaRequest(BaseModel):
 
 @app.post("/deal-history")
 def deal_history(req: FullRequest):
-    return full_deal_history(req)
+
+    return run_fetch(
+        req.deal_id
+    )
 
 
 @app.post("/deal-history-delta")
 def deal_history_delta(req: DeltaRequest):
-    return delta_deal_history(req)
+
+    return run_delta(
+        req.deal_id,
+        req.latest_call_date,
+        req.latest_email_date,
+        req.latest_note_date,
+        req.latest_activity_date
+    )
+
+
+@app.get("/")
+def health():
+
+    return {
+        "status": "ok",
+        "endpoints": [
+            "/deal-history",
+            "/deal-history-delta"
+        ]
+    }
