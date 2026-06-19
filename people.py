@@ -1,7 +1,7 @@
 import os
 import requests
 
-API_TOKEN = os.getenv("PIPEDRIVE_API_TOKEN")
+API_TOKEN = os.getenv("PIPEDRIVE_TOKEN")
 
 USER_ID = 11275953
 QUICK_FILTER_ID = 391495
