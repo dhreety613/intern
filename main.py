@@ -4,6 +4,10 @@ from pydantic import BaseModel
 from fetch1 import run_fetch
 from three1 import run_delta
 
+from people import fetch_people
+from cleanraw import clean_people
+
+
 app = FastAPI()
 
 
@@ -39,6 +43,25 @@ def deal_history_delta(req: DeltaRequest):
     )
 
 
+class CleanPeopleRequest(BaseModel):
+    people: list
+
+@app.post("/person-fetch")
+def person_fetch():
+
+    return fetch_people()
+
+
+@app.post("/person-clean")
+def person_clean(
+    req: CleanPeopleRequest
+):
+
+    return clean_people(
+        req.people
+    )
+
+
 @app.get("/")
 def health():
 
@@ -46,6 +69,8 @@ def health():
         "status": "ok",
         "endpoints": [
             "/deal-history",
-            "/deal-history-delta"
+            "/deal-history-delta",
+            "/person-fetch",
+            "/person-clean"
         ]
     }
