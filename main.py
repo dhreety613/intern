@@ -62,7 +62,7 @@ def person_clean(
     return clean_people(
         req.people
     )
-@app.get("/constant-contact/existing-emails")
+@app.post("/constant-contact/existing-emails")
 def constant_contact_existing_emails():
 
     return fetch_existing_cc_emails()
