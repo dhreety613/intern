@@ -7,6 +7,8 @@ from three1 import run_delta
 from people import fetch_people
 from cleanraw import clean_people
 
+from block3 import fetch_existing_cc_emails
+
 
 app = FastAPI()
 
@@ -60,7 +62,10 @@ def person_clean(
     return clean_people(
         req.people
     )
+@app.get("/constant-contact/existing-emails")
+def constant_contact_existing_emails():
 
+    return fetch_existing_cc_emails()
 
 @app.get("/")
 def health():
@@ -71,6 +76,7 @@ def health():
             "/deal-history",
             "/deal-history-delta",
             "/person-fetch",
-            "/person-clean"
+            "/person-clean",
+            "/constant-contact/existing-emails"
         ]
     }
