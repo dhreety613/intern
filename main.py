@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+from typing import List, Dict, Any
+
 
 from fetch1 import run_fetch
 from three1 import run_delta
@@ -8,7 +10,10 @@ from people import fetch_people
 from cleanraw import clean_people
 
 from block3 import fetch_existing_cc_emails
+from block4 import upload_contacts
 
+class UploadContactsRequest(BaseModel):
+    contacts: List[Dict[str, Any]]
 
 app = FastAPI()
 
@@ -67,6 +72,11 @@ def constant_contact_existing_emails():
 
     return fetch_existing_cc_emails()
 
+@app.post("/constant-contact/upload")
+def constant_contact_upload(request: UploadContactsRequest):
+
+    return upload_contacts(request.contacts)
+
 @app.get("/")
 def health():
 
@@ -77,6 +87,7 @@ def health():
             "/deal-history-delta",
             "/person-fetch",
             "/person-clean",
-            "/constant-contact/existing-emails"
+            "/constant-contact/existing-emails",
+            "/constant-contact/upload"
         ]
     }
