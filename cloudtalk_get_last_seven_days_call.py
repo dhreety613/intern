@@ -13,8 +13,7 @@ BASE_URL = "https://my.cloudtalk.io/api/calls/index.json"
 
 def fetch_calls():
 
-    os.makedirs(STORAGE_DIR, exist_ok=True)
-
+    
     today = datetime.utcnow()
     yesterday = today - timedelta(days=1)
     week_ago = yesterday - timedelta(days=5)
