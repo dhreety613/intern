@@ -7,53 +7,60 @@ GRAPHQL_URL = "https://api.fireflies.ai/graphql"
 
 def upload_to_the_fireflies(files):
 
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {FIREFLIES_API_KEY}"
+    }
+
     uploaded = []
     failed = []
 
-    headers = {
-        "Authorization": f"Bearer {FIREFLIES_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    mutation = """
-    mutation UploadAudio($url: String!) {
-      uploadAudio(
-        input:{
-          url:$url
-        }
-      ){
-        success
-        title
-        transcriptId
-      }
-    }
-    """
-
     for file in files:
+
+        input_data = {
+            "url": file["url"],
+            "title": file["filename"]
+        }
+
+        data = {
+            "query": """
+                mutation($input: AudioUploadInput){
+                    uploadAudio(input:$input){
+                        success
+                        title
+                        message
+                    }
+                }
+            """,
+            "variables": {
+                "input": input_data
+            }
+        }
 
         try:
 
-            payload = {
-                "query": mutation,
-                "variables": {
-                    "url": file["url"]
-                }
-            }
-
             r = requests.post(
                 GRAPHQL_URL,
-                json=payload,
                 headers=headers,
+                json=data,
                 timeout=180
             )
 
-            response = r.json()
+            result = r.json()
 
-            uploaded.append({
-                "filename": file["filename"],
-                "url": file["url"],
-                "fireflies": response
-            })
+            if "errors" in result:
+
+                failed.append({
+                    "filename": file["filename"],
+                    "error": result["errors"]
+                })
+
+            else:
+
+                uploaded.append({
+                    "filename": file["filename"],
+                    "response": result["data"]["uploadAudio"]
+                })
 
         except Exception as e:
 
@@ -66,6 +73,6 @@ def upload_to_the_fireflies(files):
         "success": True,
         "uploaded": len(uploaded),
         "failed": len(failed),
-        "results": uploaded,
+        "uploads": uploaded,
         "errors": failed
     }
