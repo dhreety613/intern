@@ -64,7 +64,7 @@ def filter_the_calls(calls):
     return {
         "success": True,
         "original_calls": len(calls),
-        "filtered_calls": len(filtered),
+        "filtered_calls_count": len(filtered),
         "agent_summary": summary,
         "filtered_calls": filtered
     }
