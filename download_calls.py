@@ -1,9 +1,6 @@
 import os
 import requests
-from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
-
-load_dotenv()
 
 API_ID = os.getenv("CLOUDTALK_KEY_ID")
 API_KEY = os.getenv("CLOUDTALK_KEY_SECRET")

@@ -4,9 +4,6 @@ from datetime import datetime, timedelta
 
 import requests
 from requests.auth import HTTPBasicAuth
-from dotenv import load_dotenv
-
-load_dotenv()
 
 ACCESS_KEY_ID = os.getenv("CLOUDTALK_KEY_ID")
 ACCESS_KEY_SECRET = os.getenv("CLOUDTALK_KEY_SECRET")
