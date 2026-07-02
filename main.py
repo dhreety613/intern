@@ -1,6 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
+from fastapi.responses import FileResponse
+import os
+
 
 
 from fetch1 import run_fetch
@@ -11,6 +14,13 @@ from cleanraw import clean_people
 
 from block3 import fetch_existing_cc_emails
 from block4 import upload_contacts
+
+from cloudtalk_get_last_seven_days_call import fetch_calls
+from filter_calls import filter_the_calls
+from download_calls import download_the_calls
+
+
+
 
 class UploadContactsRequest(BaseModel):
     contacts: List[Dict[str, Any]]
@@ -28,6 +38,12 @@ class DeltaRequest(BaseModel):
     latest_email_date: str | None = None
     latest_note_date: str | None = None
     latest_activity_date: str | None = None
+
+class FilterRequest(BaseModel):
+    calls: List[Dict[str, Any]]
+
+class DownloadRequest(BaseModel):
+    filtered_calls: List[Dict[str, Any]]
 
 
 @app.post("/deal-history")
@@ -77,6 +93,57 @@ def constant_contact_upload(request: UploadContactsRequest):
 
     return upload_contacts(request.contacts)
 
+@app.post("/cloudtalk_lastweek_calls_all")
+def fetch_cloudtalk_weekcalls():
+    return fetch_calls()
+
+
+@app.post("/filter_cloudtalk_calls")
+def filter_calls_endpoint(request: FilterRequest):
+
+    try:
+        return filter_the_calls(request.calls)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+    
+@app.post("/download_cloudtalk_calls")
+def download_calls_endpoint(request: DownloadRequest):
+
+    try:
+        return download_the_calls(request.filtered_calls)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+    
+@app.get("/recordings/{filename}")
+def get_recording(filename: str):
+
+    filepath = os.path.join(
+        "storage",
+        "recordings",
+        filename
+    )
+
+    if not os.path.exists(filepath):
+        raise HTTPException(
+            status_code=404,
+            detail="Recording not found."
+        )
+
+    return FileResponse(
+        filepath,
+        media_type="audio/wav",
+        filename=filename
+    )
+
+    
 @app.get("/")
 def health():
 
@@ -88,6 +155,9 @@ def health():
             "/person-fetch",
             "/person-clean",
             "/constant-contact/existing-emails",
-            "/constant-contact/upload"
+            "/constant-contact/upload",
+            "/cloudtalk_lastweek_calls_all",
+            "/filter_cloudtalk_calls",
+            "/download_cloudtalk_calls"
         ]
     }
