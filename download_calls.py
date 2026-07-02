@@ -57,7 +57,7 @@ def download_the_calls(filtered_calls):
             downloaded.append({
                 "call_id": call_id,
                 "filename": filename,
-                "url": f"/recordings/{filename}"
+                "url": f"https://fetch-history-e22w.onrender.com/recordings/{filename}"
             })
 
         except Exception as e:
