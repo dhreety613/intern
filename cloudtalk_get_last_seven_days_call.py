@@ -10,9 +10,6 @@ ACCESS_KEY_SECRET = os.getenv("CLOUDTALK_KEY_SECRET")
 
 BASE_URL = "https://my.cloudtalk.io/api/calls/index.json"
 
-STORAGE_DIR = "storage"
-OUTPUT_FILE = os.path.join(STORAGE_DIR, "calls_last7days.json")
-
 
 def fetch_calls():
 
@@ -76,13 +73,11 @@ def fetch_calls():
 
         page += 1
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(all_calls, f, indent=4)
-
+    
     return {
         "success": True,
         "total_calls": len(all_calls),
         "from": FROM_DATE,
         "to": TO_DATE,
-        "file": OUTPUT_FILE
-    }
+        "calls": all_calls
+         }
