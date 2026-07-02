@@ -18,6 +18,8 @@ from block4 import upload_contacts
 from cloudtalk_get_last_seven_days_call import fetch_calls
 from filter_calls import filter_the_calls
 from download_calls import download_the_calls
+from upload_to_fireflies import upload_to_the_fireflies
+
 
 
 
@@ -44,6 +46,9 @@ class FilterRequest(BaseModel):
 
 class DownloadRequest(BaseModel):
     filtered_calls: List[Dict[str, Any]]
+
+class FirefliesRequest(BaseModel):
+    files: list
 
 
 @app.post("/deal-history")
@@ -121,7 +126,7 @@ def download_calls_endpoint(request: DownloadRequest):
             status_code=500,
             detail=str(e)
         )
-    
+  #so as the file stored are accessible to download via public endpoint that fireflies will call and download  
 @app.get("/recordings/{filename}")
 def get_recording(filename: str):
 
@@ -143,6 +148,18 @@ def get_recording(filename: str):
         filename=filename
     )
 
+
+@app.post("/upload_fireflies")
+def upload_fireflies_endpoint(request: FirefliesRequest):
+
+    try:
+        return upload_to_the_fireflies(request.files)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
     
 @app.get("/")
 def health():
@@ -158,6 +175,7 @@ def health():
             "/constant-contact/upload",
             "/cloudtalk_lastweek_calls_all",
             "/filter_cloudtalk_calls",
-            "/download_cloudtalk_calls"
+            "/download_cloudtalk_calls",
+            "/upload_fireflies"
         ]
     }
