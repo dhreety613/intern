@@ -1,13 +1,9 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from fastapi.responses import FileResponse
 import os
 
-#frontend
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
 
 
 from fetch1 import run_fetch
@@ -25,25 +21,14 @@ from download_calls import download_the_calls
 from upload_to_fireflies import upload_to_the_fireflies
 
 
-app = FastAPI(docs_url=None)
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-templates = Jinja2Templates(directory="templates")
 
 
-
-
-
-
-
-
-
-
-app = FastAPI(docs_url=None)
 
 class UploadContactsRequest(BaseModel):
     contacts: List[Dict[str, Any]]
+
+app = FastAPI()
+
 
 class FullRequest(BaseModel):
     deal_id: int
@@ -62,20 +47,8 @@ class FilterRequest(BaseModel):
 class DownloadRequest(BaseModel):
     filtered_calls: List[Dict[str, Any]]
 
-
 class FirefliesRequest(BaseModel):
     files: list
-
-
-@app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request}
-    )
-
-
-
 
 
 @app.post("/deal-history")
