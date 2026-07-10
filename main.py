@@ -10,6 +10,8 @@ from fetch1 import run_fetch
 from three1 import run_delta
 
 from people import fetch_people
+from people_cianflone import fetch_people_cianflone
+from people_king import fetch_people_king
 from cleanraw import clean_people
 
 from block3 import fetch_existing_cc_emails
@@ -78,6 +80,16 @@ class CleanPeopleRequest(BaseModel):
 def person_fetch():
 
     return fetch_people()
+@app.post("/person-fetch-cianflone")
+def person_fetch():
+
+    return fetch_people_cianflone()
+
+@app.post("/person-fetch-king")
+def person_fetch():
+
+    return fetch_people_king()
+
 
 
 @app.post("/person-clean")
