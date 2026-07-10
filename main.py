@@ -81,12 +81,12 @@ def person_fetch():
 
     return fetch_people()
 @app.post("/person-fetch-cianflone")
-def person_fetch():
+def person_fetch_cianflone():
 
     return fetch_people_cianflone()
 
 @app.post("/person-fetch-king")
-def person_fetch():
+def person_fetch_king():
 
     return fetch_people_king()
 
