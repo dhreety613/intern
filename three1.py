@@ -1,8 +1,14 @@
 import requests
 from bs4 import BeautifulSoup
 from html import unescape
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import os
+
+# Pipedrive account timezone. Its add_time/update_time fields are naive
+# strings in the ACCOUNT's local timezone, not UTC. Set this to match your
+# Pipedrive account (Company Settings -> General -> Timezone). Philippines
+# is UTC+8 (not +12) — update this if your account is set to something else.
+PIPEDRIVE_TZ = timezone(timedelta(hours=8))
 
 
 class PipedriveDealHistoryFetcher:
@@ -37,22 +43,50 @@ class PipedriveDealHistoryFetcher:
 
     # =====================================================
     # DATE PARSER
+    # Always returns a timezone-AWARE datetime in UTC, or None.
+    # - Strings with an explicit offset/Z (e.g. what we ourselves emit, or
+    #   what n8n/JS round-trips back) are trusted as-is and converted to UTC.
+    # - Naive strings (Pipedrive's raw add_time/update_time/message_time)
+    #   are assumed to be in PIPEDRIVE_TZ before converting to UTC.
+    # This is what stops the silent 8-hour drift: once a date leaves this
+    # function it always carries an explicit, unambiguous instant.
     # =====================================================
 
     @staticmethod
     def parse_date(value):
         if not value:
             return None
+
+        value = value.strip()
+        dt = None
+
         try:
-            return datetime.fromisoformat(value.replace("Z", ""))
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except Exception:
             pass
-        try:
-            return datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
-        except Exception:
-            pass
-        print(f"WARNING: could not parse date value: {value!r}")
-        return None
+
+        if dt is None:
+            try:
+                dt = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+        if dt is None:
+            print(f"WARNING: could not parse date value: {value!r}")
+            return None
+
+        if dt.tzinfo is None:
+            # naive -> assume Pipedrive account-local time
+            dt = dt.replace(tzinfo=PIPEDRIVE_TZ)
+
+        return dt.astimezone(timezone.utc)
+
+    @staticmethod
+    def to_utc_iso(dt):
+        """Format an aware UTC datetime as an unambiguous ISO string ending in Z."""
+        if dt is None:
+            return None
+        return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     @classmethod
     def filter_after(cls, items, field_name, cutoff):
@@ -168,9 +202,12 @@ class PipedriveDealHistoryFetcher:
 
     @classmethod
     def latest_date(cls, items, field_name, fallback, id_field="id"):
-        """Max [field_name] date among items, as (date_str, id). If items is
-        empty, returns the fallback cutoff unchanged (and no id) so the next
-        run's cutoff doesn't move when nothing new came in."""
+        """Max [field_name] date among items, returned as a normalized UTC
+        ISO string, plus the matching id. If items is empty, re-normalizes
+        and returns the fallback cutoff (no id) so the next run's cutoff
+        doesn't move when nothing new came in -- and so every value coming
+        out of this function is in the same unambiguous UTC format,
+        regardless of which branch produced it."""
         dated = []
         for item in items:
             dt = cls.parse_date(item.get(field_name))
@@ -178,10 +215,10 @@ class PipedriveDealHistoryFetcher:
                 dated.append((dt, item))
 
         if not dated:
-            return fallback, None
+            return cls.to_utc_iso(cls.parse_date(fallback)) or fallback, None
 
         dt, item = max(dated, key=lambda x: x[0])
-        return item.get(field_name), item.get(id_field)
+        return cls.to_utc_iso(dt), item.get(id_field)
 
     # =====================================================
     # MASTER — returns ONLY items after the given cutoff dates,
