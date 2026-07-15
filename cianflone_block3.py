@@ -46,7 +46,7 @@ def get_cianflone_main_list_id(headers):
     raise Exception("Tensitron - Main list not found.")
 
 
-def fetch_existing_cc_emails():
+def fetch_existing_cc_emails_cian():
 
     access_token = get_access_token()
 

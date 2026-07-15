@@ -46,7 +46,7 @@ def get_kingtester_main_list_id(headers):
     raise Exception("Tensitron - Main list not found.")
 
 
-def fetch_existing_cc_emails():
+def fetch_existing_cc_emails_king():
 
     access_token = get_access_token()
 

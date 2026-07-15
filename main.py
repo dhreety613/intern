@@ -8,6 +8,7 @@ import os
 
 from fetch1 import run_fetch
 from three1 import run_delta
+from get_deal_ids import get_sales_deal_ids_for_actsummary
 
 from people import fetch_people
 from people_cianflone import fetch_people_cianflone
@@ -15,6 +16,8 @@ from people_king import fetch_people_king
 from cleanraw import clean_people
 
 from block3 import fetch_existing_cc_emails
+from king_block3 import fetch_existing_cc_emails_king
+from cianflone_block3 import fetch_existing_cc_emails_cian
 from block4 import upload_contacts
 
 from cloudtalk_get_last_seven_days_call import fetch_calls
@@ -51,6 +54,22 @@ class DownloadRequest(BaseModel):
 
 class FirefliesRequest(BaseModel):
     files: list
+
+@app.get("/get-deal-ids-with-stage-ids")
+def get_deal_ids_with_stage_ids():
+    try:
+        deal_ids = get_sales_deal_ids_for_actsummary()
+        return{
+            "sucess": True,
+            "count": len(deal_ids),
+            "deal_ids": deal_ids,
+        }
+    except Exception as e:
+        return{
+            "sucess": False,
+            "error": str(e),
+        }
+
 
 
 @app.post("/deal-history")
@@ -104,6 +123,19 @@ def person_clean(
 def constant_contact_existing_emails():
 
     return fetch_existing_cc_emails()
+
+@app.post("/constant-contact/king-existing-emails")
+def constant_king_contact_existing_emails():
+
+    return fetch_existing_cc_emails_king()
+
+@app.post("/constant-contact/cianflone-existing-emails")
+def constant_cian_contact_existing_emails():
+
+    return fetch_existing_cc_emails_cian()
+
+
+
 
 @app.post("/constant-contact/upload")
 def constant_contact_upload(request: UploadContactsRequest):
