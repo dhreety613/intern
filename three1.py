@@ -582,8 +582,7 @@ class PipedriveDealHistoryFetcher:
     # =====================================================
     # MASTER
     # =====================================================
-
-    def fetch_history(
+def fetch_history(
     self,
     deal_id,
     latest_call_date=None,
@@ -592,68 +591,56 @@ class PipedriveDealHistoryFetcher:
     latest_activity_date=None
 ):
 
-        activities = self.get_activities(
-            deal_id
+    # Fetch full history
+    activities = self.get_activities(deal_id)
+
+    notes = self.get_notes(deal_id)
+
+    emails = self.get_emails(
+        deal_id,
+        latest_email_date
     )
 
-        notes = self.get_notes(
-            deal_id
+    # Compute latest values BEFORE filtering
+    latest_call = self.latest_call(activities)
+
+    latest_note = self.latest_note(notes)
+
+    latest_activity = self.latest_activity(activities)
+
+    latest_email = self.latest_email(emails)
+
+    # Filter only what will be returned
+    filtered_activities = self.filter_after(
+        activities,
+        "updated_at",
+        latest_activity_date
     )
 
-        emails = self.get_emails(
-    deal_id,
-    latest_email_date
-)
-
-        activities = self.filter_after(
-            activities,
-            "updated_at",
-            latest_activity_date
+    filtered_notes = self.filter_after(
+        notes,
+        "updated_at",
+        latest_note_date
     )
 
-        notes = self.filter_after(
-            notes,
-            "updated_at",
-            latest_note_date
-    )
+    return {
 
-        
-        return {
+        "deal_id": deal_id,
 
-            "deal_id":
-                deal_id,
+        "latest_call": latest_call,
 
-            "latest_call":
-                self.latest_call(
-                    activities
-                ),
+        "latest_email": latest_email,
 
-            "latest_email":
-                self.latest_email(
-                    emails
-                ),
+        "latest_note": latest_note,
 
-            "latest_note":
-                self.latest_note(
-                    notes
-                ),
+        "latest_activity": latest_activity,
 
-            "latest_activity":
-                self.latest_activity(
-                    activities
-                ),
+        "activities": filtered_activities,
 
-            "activities":
-                activities,
+        "notes": filtered_notes,
 
-            "notes":
-                notes,
-
-            "emails":
-                emails
-        }
-
-
+        "emails": emails
+    }
 # =====================================================
 # TEST
 # =====================================================
