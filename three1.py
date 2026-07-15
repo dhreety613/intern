@@ -9,7 +9,7 @@ import os
 # are naive strings in the ACCOUNT's local timezone, not UTC. Philippines is
 # UTC+8 — change this if your Pipedrive account's timezone differs
 # (Company Settings -> General -> Timezone).
-PIPEDRIVE_TZ = timezone(timedelta(hours=8))
+PIPEDRIVE_TZ = timezone(timedelta(hours=0))
 
 
 class PipedriveDealHistoryFetcher:
