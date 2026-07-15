@@ -451,7 +451,7 @@ class PipedriveDealHistoryFetcher:
         if not dated:
             if fallback in ("", None):
                 return None, None
-            dt= cls.parse_data(fallback)
+            dt= cls.parse_date(fallback)
 
             return cls.to_utc_iso(dt), None 
 
