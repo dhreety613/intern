@@ -1,13 +1,17 @@
 import requests
+import json
 from bs4 import BeautifulSoup
 from html import unescape
 from datetime import datetime, timezone, timedelta
 import os
 
-# Pipedrive account timezone. Its add_time/update_time fields are naive
-# strings in the ACCOUNT's local timezone, not UTC. Set this to match your
-# Pipedrive account (Company Settings -> General -> Timezone). Philippines
-# is UTC+8 (not +12) — update this if your account is set to something else.
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+# Pipedrive account timezone. add_time/update_time/message_time from the API
+# are naive strings in the ACCOUNT's local timezone, not UTC. Philippines is
+# UTC+8 — change this if your Pipedrive account's timezone differs
+# (Company Settings -> General -> Timezone).
 PIPEDRIVE_TZ = timezone(timedelta(hours=8))
 
 
@@ -26,8 +30,14 @@ class PipedriveDealHistoryFetcher:
         params = params or {}
         params["api_token"] = self.api_token
 
-        r = requests.get(f"{self.base_url}{endpoint}", params=params, timeout=60)
+        r = requests.get(
+            f"{self.base_url}{endpoint}",
+            params=params,
+            timeout=60
+        )
+
         r.raise_for_status()
+
         return r.json()
 
     # =====================================================
@@ -36,24 +46,35 @@ class PipedriveDealHistoryFetcher:
 
     @staticmethod
     def clean_html(text):
+
         if not text:
             return ""
+
         text = unescape(text)
-        return BeautifulSoup(text, "html.parser").get_text(separator="\n", strip=True)
+
+        return BeautifulSoup(
+            text,
+            "html.parser"
+        ).get_text(
+            separator="\n",
+            strip=True
+        )
 
     # =====================================================
     # DATE PARSER
     # Always returns a timezone-AWARE datetime in UTC, or None.
-    # - Strings with an explicit offset/Z (e.g. what we ourselves emit, or
-    #   what n8n/JS round-trips back) are trusted as-is and converted to UTC.
+    # - Strings with an explicit offset/Z (anything this service itself
+    #   emits, or that gets round-tripped back through n8n/JS) are trusted
+    #   as-is and converted to UTC.
     # - Naive strings (Pipedrive's raw add_time/update_time/message_time)
     #   are assumed to be in PIPEDRIVE_TZ before converting to UTC.
-    # This is what stops the silent 8-hour drift: once a date leaves this
-    # function it always carries an explicit, unambiguous instant.
+    # This is what stops the silent multi-hour drift that was making old
+    # items look "new" again on every run.
     # =====================================================
 
     @staticmethod
     def parse_date(value):
+
         if not value:
             return None
 
@@ -76,139 +97,355 @@ class PipedriveDealHistoryFetcher:
             return None
 
         if dt.tzinfo is None:
-            # naive -> assume Pipedrive account-local time
             dt = dt.replace(tzinfo=PIPEDRIVE_TZ)
 
         return dt.astimezone(timezone.utc)
 
     @staticmethod
     def to_utc_iso(dt):
-        """Format an aware UTC datetime as an unambiguous ISO string ending in Z."""
         if dt is None:
             return None
         return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
-    @classmethod
-    def filter_after(cls, items, field_name, cutoff):
-        """Return only items whose [field_name] date is strictly after cutoff.
-        No cutoff -> nothing is filtered out."""
-        cutoff_dt = cls.parse_date(cutoff)
+    @staticmethod
+    def filter_after(items, field_name, cutoff):
+
+        cutoff_dt = PipedriveDealHistoryFetcher.parse_date(cutoff)
+
         if not cutoff_dt:
             return items
 
-        result = []
+        filtered = []
+
         for item in items:
-            item_dt = cls.parse_date(item.get(field_name))
-            if item_dt and item_dt > cutoff_dt:
-                result.append(item)
-        return result
+
+            item_dt = PipedriveDealHistoryFetcher.parse_date(
+                item.get(field_name)
+            )
+
+            if (
+                item_dt
+                and item_dt > cutoff_dt
+            ):
+                filtered.append(item)
+
+        return filtered
 
     # =====================================================
-    # ACTIVITIES (split into calls vs. everything else)
+    # ACTIVITIES  (raw fetch, unfiltered — kept as its own step)
     # =====================================================
 
     def get_activities(self, deal_id):
-        data = self._get(f"/deals/{deal_id}/activities")
 
-        calls, other = [], []
+        print("\nSTEP 1 - ACTIVITIES")
+
+        data = self._get(
+            f"/deals/{deal_id}/activities"
+        )
+
+        results = []
+
         for a in (data.get("data") or []):
-            record = {
-                "id": a.get("id"),
-                "type": a.get("type"),
-                "subject": a.get("subject"),
-                "text": self.clean_html(a.get("note")),
-                "created_at": a.get("add_time"),
-                "updated_at": a.get("update_time"),
-            }
-            is_call = str(a.get("type", "")).lower() == "call" or str(a.get("subject", "")).lower() == "call"
-            (calls if is_call else other).append(record)
 
-        return calls, other
+            results.append({
+
+                "id":
+                    a.get("id"),
+
+                "type":
+                    a.get("type"),
+
+                "subject":
+                    a.get("subject"),
+
+                "text":
+                    self.clean_html(
+                        a.get("note")
+                    ),
+
+                "created_at":
+                    a.get("add_time"),
+
+                "updated_at":
+                    a.get("update_time")
+            })
+
+        print(
+            f"Activities fetched: {len(results)}"
+        )
+
+        return results
+
+    # =====================================================
+    # CALLS  (extracted as its own step, not sifted out later —
+    # this is what was missing before: calls need their own cutoff,
+    # not the generic latest_activity_date one)
+    # =====================================================
+
+    def get_calls(self, activities):
+
+        print("\nSTEP 1B - CALLS (from activities)")
+
+        calls = [
+            a for a in activities
+            if str(a.get("type", "")).lower() == "call"
+            or str(a.get("subject", "")).lower() == "call"
+        ]
+
+        print(
+            f"Calls fetched: {len(calls)}"
+        )
+
+        return calls
+
+    @staticmethod
+    def non_call_activities(activities):
+        return [
+            a for a in activities
+            if not (
+                str(a.get("type", "")).lower() == "call"
+                or str(a.get("subject", "")).lower() == "call"
+            )
+        ]
 
     # =====================================================
     # NOTES
     # =====================================================
 
     def get_notes(self, deal_id):
-        data = self._get(f"/deals/{deal_id}/notes")
 
-        return [
-            {
-                "id": n.get("id"),
-                "text": self.clean_html(n.get("content")),
-                "created_at": n.get("add_time"),
-                "updated_at": n.get("update_time"),
-            }
-            for n in (data.get("data") or [])
-        ]
+        print("\nSTEP 2 - NOTES")
+
+        data = self._get(
+            f"/deals/{deal_id}/notes"
+        )
+
+        notes = []
+
+        for n in (data.get("data") or []):
+
+            notes.append({
+
+                "id":
+                    n.get("id"),
+
+                "text":
+                    self.clean_html(
+                        n.get("content")
+                    ),
+
+                "created_at":
+                    n.get("add_time"),
+
+                "updated_at":
+                    n.get("update_time")
+            })
+
+        print(
+            f"Notes fetched: {len(notes)}"
+        )
+
+        return notes
+
+    # =====================================================
+    # EMAIL LIST
+    # =====================================================
+
+    def get_email_messages(self, deal_id):
+
+        print("\nSTEP 3 - EMAIL HEADERS")
+
+        data = self._get(
+            f"/deals/{deal_id}/mailMessages"
+        )
+
+        emails = []
+
+        for item in (data.get("data") or []):
+
+            if item.get("object") != "mailMessage":
+                continue
+
+            emails.append(
+                item.get("data", {})
+            )
+
+        print(
+            f"Email headers fetched: {len(emails)}"
+        )
+
+        return emails
+
+    # =====================================================
+    # EMAIL DETAILS
+    # =====================================================
+
+    def get_email_details(self, message_id):
+
+        try:
+
+            data = self._get(
+                f"/mailbox/mailMessages/{message_id}"
+            )
+
+            return data.get("data", {})
+
+        except Exception as e:
+
+            print(
+                f"FAILED EMAIL DETAIL {message_id}: {e}"
+            )
+
+            return {}
+
+    # =====================================================
+    # EMAIL BODY
+    # =====================================================
+
+    def fetch_email_body(self, body_url):
+
+        if not body_url:
+            return ""
+
+        try:
+
+            r = requests.get(
+                body_url,
+                timeout=60
+            )
+
+            if r.status_code != 200:
+                return ""
+
+            return self.clean_html(
+                r.text
+            )
+
+        except Exception as e:
+
+            print(
+                f"BODY DOWNLOAD FAILED: {e}"
+            )
+
+            return ""
 
     # =====================================================
     # EMAILS
     # =====================================================
 
-    def get_email_messages(self, deal_id):
-        data = self._get(f"/deals/{deal_id}/mailMessages")
-        return [item.get("data", {}) for item in (data.get("data") or []) if item.get("object") == "mailMessage"]
+    def get_emails(
+            self,
+        deal_id,
+        latest_email_date=None
+):
 
-    def get_email_details(self, message_id):
-        try:
-            data = self._get(f"/mailbox/mailMessages/{message_id}")
-            return data.get("data", {})
-        except Exception as e:
-            print(f"FAILED EMAIL DETAIL {message_id}: {e}")
-            return {}
+        headers = self.get_email_messages(
+            deal_id
+    )
 
-    def fetch_email_body(self, body_url):
-        if not body_url:
-            return ""
-        try:
-            r = requests.get(body_url, timeout=60)
-            return self.clean_html(r.text) if r.status_code == 200 else ""
-        except Exception as e:
-            print(f"BODY DOWNLOAD FAILED: {e}")
-            return ""
-
-    def get_emails(self, deal_id, latest_email_date=None):
-        headers = self.get_email_messages(deal_id)
-
-        # only pull full details/bodies for headers already past the cutoff,
-        # so we don't waste calls on emails we're going to throw away anyway
-        new_headers = self.filter_after(headers, "message_time", latest_email_date)
+        new_headers = self.filter_after(
+            headers,
+            "message_time",
+            latest_email_date
+    )
 
         emails = []
-        for email in new_headers:
-            details = self.get_email_details(email.get("id"))
+
+        total = len(
+            new_headers
+    )
+
+        print(
+            f"\nSTEP 4 - FETCHING {total} NEW EMAILS"
+    )
+
+        for i, email in enumerate(
+            new_headers,
+            start=1
+    ):
+
+            msg_id = email.get("id")
+
+            print(
+                f"[{i}/{total}] Email ID {msg_id}"
+        )
+
+            details = self.get_email_details(
+                msg_id
+        )
 
             body = ""
-            if details.get("has_body_flag"):
-                body = self.fetch_email_body(details.get("body_url"))
+
+            if details.get(
+                "has_body_flag"
+        ):
+
+                body = self.fetch_email_body(
+                    details.get(
+                        "body_url"
+                )
+            )
 
             emails.append({
-                "id": details.get("id"),
-                "thread_id": details.get("mail_thread_id"),
-                "subject": details.get("subject"),
-                "snippet": details.get("snippet"),
-                "body": body,
-                "from": details.get("from", []),
-                "to": details.get("to", []),
-                "created_at": details.get("message_time"),
-            })
+
+                "id":
+                    details.get("id"),
+
+                "thread_id":
+                    details.get(
+                        "mail_thread_id"
+                ),
+
+                "subject":
+                    details.get(
+                        "subject"
+                ),
+
+                "snippet":
+                    details.get(
+                        "snippet"
+                ),
+
+                "body":
+                    body,
+
+                "from":
+                    details.get(
+                        "from",
+                        []
+                ),
+
+                "to":
+                    details.get(
+                        "to",
+                        []
+                ),
+
+                "created_at":
+                    details.get(
+                        "message_time"
+                )
+        })
+
+        print(
+            f"\nEmails fetched: {len(emails)}"
+    )
 
         return emails
 
     # =====================================================
-    # LATEST DATE HELPER
+    # LATEST-DATE HELPER  (shared by all four types)
+    # Returns a normalized UTC ISO string + matching id. If items is
+    # empty, re-normalizes and returns the fallback cutoff unchanged
+    # (no id), so persisting this doesn't move the cutoff backwards
+    # and doesn't drift when it's fed back in on the next run.
     # =====================================================
 
     @classmethod
-    def latest_date(cls, items, field_name, fallback, id_field="id"):
-        """Max [field_name] date among items, returned as a normalized UTC
-        ISO string, plus the matching id. If items is empty, re-normalizes
-        and returns the fallback cutoff (no id) so the next run's cutoff
-        doesn't move when nothing new came in -- and so every value coming
-        out of this function is in the same unambiguous UTC format,
-        regardless of which branch produced it."""
+    def latest_of(cls, items, field_name, fallback, id_field="id"):
+
         dated = []
+
         for item in items:
             dt = cls.parse_date(item.get(field_name))
             if dt:
@@ -221,37 +458,43 @@ class PipedriveDealHistoryFetcher:
         return cls.to_utc_iso(dt), item.get(id_field)
 
     # =====================================================
-    # MASTER — returns ONLY items after the given cutoff dates,
-    # plus updated cutoffs to persist for the next run
+    # MASTER
     # =====================================================
 
-    def fetch_new_history(
+    def fetch_history(
         self,
         deal_id,
         latest_call_date=None,
         latest_email_date=None,
         latest_note_date=None,
-        latest_activity_date=None,
+        latest_activity_date=None
     ):
-        calls, other_activities = self.get_activities(deal_id)
-        notes = self.get_notes(deal_id)
 
+        # Individual extraction steps, kept separate on purpose.
+        all_activities = self.get_activities(deal_id)
+        calls = self.get_calls(all_activities)
+        other_activities = self.non_call_activities(all_activities)
+
+        notes = self.get_notes(deal_id)
+        emails = self.get_emails(deal_id, latest_email_date)
+
+        # Each type filtered by its OWN cutoff — this is the actual fix.
+        # Before, calls were never split out, so latest_call_date was
+        # silently ignored and calls kept riding along inside "activities".
         new_calls = self.filter_after(calls, "updated_at", latest_call_date)
         new_activities = self.filter_after(other_activities, "updated_at", latest_activity_date)
         new_notes = self.filter_after(notes, "updated_at", latest_note_date)
-        new_emails = self.get_emails(deal_id, latest_email_date)
+        # emails are already filtered inside get_emails()
 
-        call_date, call_id = self.latest_date(new_calls, "updated_at", latest_call_date)
-        activity_date, activity_id = self.latest_date(new_activities, "updated_at", latest_activity_date)
-        note_date, note_id = self.latest_date(new_notes, "updated_at", latest_note_date)
-        email_date, email_id = self.latest_date(new_emails, "created_at", latest_email_date)
+        call_date, call_id = self.latest_of(new_calls, "updated_at", latest_call_date)
+        activity_date, activity_id = self.latest_of(new_activities, "updated_at", latest_activity_date)
+        note_date, note_id = self.latest_of(new_notes, "updated_at", latest_note_date)
+        email_date, email_id = self.latest_of(emails, "created_at", latest_email_date)
 
         return {
+
             "deal_id": deal_id,
-            "calls": new_calls,
-            "activities": new_activities,
-            "notes": new_notes,
-            "emails": new_emails,
+
             "latest_dates": {
                 "latest_call_date": call_date,
                 "latest_call_id": call_id,
@@ -262,56 +505,72 @@ class PipedriveDealHistoryFetcher:
                 "latest_email_date": email_date,
                 "latest_email_id": email_id,
             },
+
+            "calls": new_calls,
+
+            "activities": new_activities,
+
+            "notes": new_notes,
+
+            "emails": emails
         }
 
 
 # =====================================================
-# ENTRY POINT — import this into main.py
+# FASTAPI APP
 # =====================================================
+
+app = FastAPI()
 
 DOMAIN = "tensitron"
 API_TOKEN = os.getenv("PIPEDRIVE_TOKEN")
 
 
-def run_delta(
-    deal_id,
-    latest_call_date=None,
-    latest_email_date=None,
-    latest_note_date=None,
-    latest_activity_date=None,
-):
-    """Fetch only what's new since the given cutoff dates for a deal.
-    Returns the new items plus updated cutoffs to persist for next time."""
+class DealRequest(BaseModel):
+    deal_id: int
 
-    fetcher = PipedriveDealHistoryFetcher(DOMAIN, API_TOKEN)
+    latest_call_date: str | None = None
+    latest_email_date: str | None = None
+    latest_note_date: str | None = None
+    latest_activity_date: str | None = None
 
-    result = fetcher.fetch_new_history(
-        deal_id,
-        latest_call_date=latest_call_date,
-        latest_email_date=latest_email_date,
-        latest_note_date=latest_note_date,
-        latest_activity_date=latest_activity_date,
+
+@app.post("/deal-history")
+def deal_history(request: DealRequest):
+
+    fetcher = PipedriveDealHistoryFetcher(
+        DOMAIN,
+        API_TOKEN
+    )
+
+    history = fetcher.fetch_history(
+        request.deal_id,
+        latest_call_date=request.latest_call_date,
+        latest_email_date=request.latest_email_date,
+        latest_note_date=request.latest_note_date,
+        latest_activity_date=request.latest_activity_date
     )
 
     return {
-        "deal_id": deal_id,
-        "latest_dates": result["latest_dates"],
+
+        "deal_id":
+            request.deal_id,
+
+        "latest_dates":
+            history["latest_dates"],
+
         "history": {
-            "calls": result["calls"],
-            "activities": result["activities"],
-            "notes": result["notes"],
-            "emails": result["emails"],
-        },
+
+            "calls":
+                history["calls"],
+
+            "activities":
+                history["activities"],
+
+            "notes":
+                history["notes"],
+
+            "emails":
+                history["emails"]
+        }
     }
-
-
-if __name__ == "__main__":
-    # quick local test
-    output = run_delta(
-        deal_id=123,  # replace with your deal id
-        latest_call_date="2025-06-01 00:00:00",
-        latest_email_date="2025-06-01 00:00:00",
-        latest_note_date="2025-06-01 00:00:00",
-        latest_activity_date="2025-06-01 00:00:00",
-    )
-    print(output)
