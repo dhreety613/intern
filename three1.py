@@ -582,50 +582,50 @@ class PipedriveDealHistoryFetcher:
     # =====================================================
     # MASTER
     # =====================================================
-def fetch_history(
-    self,
-    deal_id,
-    latest_call_date=None,
-    latest_email_date=None,
-    latest_note_date=None,
-    latest_activity_date=None
-):
+    def fetch_history(
+        self,
+        deal_id,
+        latest_call_date=None,
+        latest_email_date=None,
+        latest_note_date=None,
+        latest_activity_date=None
+    ):
 
     # Fetch full history
-    activities = self.get_activities(deal_id)
+        activities = self.get_activities(deal_id)
 
-    notes = self.get_notes(deal_id)
+        notes = self.get_notes(deal_id)
 
-    emails = self.get_emails(
-        deal_id,
-        latest_email_date
-    )
+        emails = self.get_emails(
+            deal_id,
+            latest_email_date
+        )
 
     # Compute latest values BEFORE filtering
-    latest_call = self.latest_call(activities)
+        latest_call = self.latest_call(activities)
 
-    latest_note = self.latest_note(notes)
+        latest_note = self.latest_note(notes)
 
-    latest_activity = self.latest_activity(activities)
+        latest_activity = self.latest_activity(activities)
 
-    latest_email = self.latest_email(emails)
+        latest_email = self.latest_email(emails)
 
     # Filter only what will be returned
-    filtered_activities = self.filter_after(
-        activities,
-        "updated_at",
-        latest_activity_date
+        filtered_activities = self.filter_after(
+            activities,
+            "updated_at",
+            latest_activity_date
     )
 
-    filtered_notes = self.filter_after(
-        notes,
-        "updated_at",
-        latest_note_date
+        filtered_notes = self.filter_after(
+            notes,
+            "updated_at",
+            latest_note_date
     )
 
-    return {
+        return {
 
-        "deal_id": deal_id,
+            "deal_id": deal_id,
 
         "latest_call": latest_call,
 
