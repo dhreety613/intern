@@ -57,13 +57,7 @@ class FirefliesRequest(BaseModel):
 
 @app.get("/get-deal-ids-with-stage-ids")
 def get_deal_ids_with_stage_ids():
-   result= get_sales_deal_ids_for_actsummary
-
-   return{
-       "success": True,
-       **result
-   }
-
+   return get_sales_deal_ids_for_actsummary()
 
 
 @app.post("/deal-history")
@@ -93,6 +87,8 @@ class CleanPeopleRequest(BaseModel):
 def person_fetch():
 
     return fetch_people()
+
+
 @app.post("/person-fetch-cianflone")
 def person_fetch_cianflone():
 
