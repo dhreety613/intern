@@ -449,7 +449,11 @@ class PipedriveDealHistoryFetcher:
                 dated.append((dt, item))
 
         if not dated:
-            return cls.to_utc_iso(cls.parse_date(fallback)) or fallback, None
+            if fallback in ("", None):
+                return None, None
+            dt= cls.parse_data(fallback)
+
+            return cls.to_utc_iso(dt), None 
 
         dt, item = max(dated, key=lambda x: x[0])
         return cls.to_utc_iso(dt), item.get(id_field)
