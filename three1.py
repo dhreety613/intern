@@ -5,9 +5,6 @@ from html import unescape
 from datetime import datetime, timezone, timedelta
 import os
 
-from fastapi import FastAPI
-from pydantic import BaseModel
-
 # Pipedrive account timezone. add_time/update_time/message_time from the API
 # are naive strings in the ACCOUNT's local timezone, not UTC. Philippines is
 # UTC+8 — change this if your Pipedrive account's timezone differs
@@ -517,60 +514,54 @@ class PipedriveDealHistoryFetcher:
 
 
 # =====================================================
-# FASTAPI APP
+# ENTRY POINT — import this into main.py:
+#   from three1 import run_delta
 # =====================================================
-
-app = FastAPI()
 
 DOMAIN = "tensitron"
 API_TOKEN = os.getenv("PIPEDRIVE_TOKEN")
 
 
-class DealRequest(BaseModel):
-    deal_id: int
+def run_delta(
+    deal_id,
+    latest_call_date=None,
+    latest_email_date=None,
+    latest_note_date=None,
+    latest_activity_date=None,
+):
+    """Fetch only what's new since the given cutoff dates for a deal.
+    Returns the new items (calls, activities, notes, emails) plus updated
+    cutoffs to persist for the next run."""
 
-    latest_call_date: str | None = None
-    latest_email_date: str | None = None
-    latest_note_date: str | None = None
-    latest_activity_date: str | None = None
-
-
-@app.post("/deal-history")
-def deal_history(request: DealRequest):
-
-    fetcher = PipedriveDealHistoryFetcher(
-        DOMAIN,
-        API_TOKEN
-    )
+    fetcher = PipedriveDealHistoryFetcher(DOMAIN, API_TOKEN)
 
     history = fetcher.fetch_history(
-        request.deal_id,
-        latest_call_date=request.latest_call_date,
-        latest_email_date=request.latest_email_date,
-        latest_note_date=request.latest_note_date,
-        latest_activity_date=request.latest_activity_date
+        deal_id,
+        latest_call_date=latest_call_date,
+        latest_email_date=latest_email_date,
+        latest_note_date=latest_note_date,
+        latest_activity_date=latest_activity_date,
     )
 
     return {
-
-        "deal_id":
-            request.deal_id,
-
-        "latest_dates":
-            history["latest_dates"],
-
+        "deal_id": deal_id,
+        "latest_dates": history["latest_dates"],
         "history": {
-
-            "calls":
-                history["calls"],
-
-            "activities":
-                history["activities"],
-
-            "notes":
-                history["notes"],
-
-            "emails":
-                history["emails"]
-        }
+            "calls": history["calls"],
+            "activities": history["activities"],
+            "notes": history["notes"],
+            "emails": history["emails"],
+        },
     }
+
+
+if __name__ == "__main__":
+    # quick local test
+    output = run_delta(
+        deal_id=123,  # replace with your deal id
+        latest_call_date="2025-06-01 00:00:00",
+        latest_email_date="2025-06-01 00:00:00",
+        latest_note_date="2025-06-01 00:00:00",
+        latest_activity_date="2025-06-01 00:00:00",
+    )
+    print(output)
