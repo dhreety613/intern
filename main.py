@@ -57,18 +57,12 @@ class FirefliesRequest(BaseModel):
 
 @app.get("/get-deal-ids-with-stage-ids")
 def get_deal_ids_with_stage_ids():
-    try:
-        deal_ids = get_sales_deal_ids_for_actsummary()
-        return{
-            "sucess": True,
-            "count": len(deal_ids),
-            "deal_ids": deal_ids,
-        }
-    except Exception as e:
-        return{
-            "sucess": False,
-            "error": str(e),
-        }
+   result= get_sales_deal_ids_for_actsummary
+
+   return{
+       "success": True,
+       **result
+   }
 
 
 
