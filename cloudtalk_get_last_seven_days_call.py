@@ -19,7 +19,7 @@ def fetch_calls():
     week_ago = yesterday - timedelta(days=5)
 
     FROM_DATE = week_ago.strftime("%Y-%m-%d")
-    TO_DATE = yesterday.strftime("%Y-%m-%d")
+    TO_DATE = today.strftime("%Y-%m-%d")
 
     LIMIT = 500
     page = 1
