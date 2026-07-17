@@ -25,6 +25,15 @@ from filter_calls import filter_the_calls
 from download_calls import download_the_calls
 from upload_to_fireflies import upload_to_the_fireflies
 
+from FINAL_merge_all_three import merge_duplicates
+
+
+class MergeDuplicatesRequest(BaseModel):
+    company: str
+    entity: str
+
+
+
 
 
 
@@ -54,6 +63,34 @@ class DownloadRequest(BaseModel):
 
 class FirefliesRequest(BaseModel):
     files: list
+
+
+@app.post("/merge-duplicates-allKTC")
+def merge_duplicate_endpoint(request: MergeDuplicatesRequest):
+
+    company = request.company.lower()
+    entity = request.entity.lower()
+
+    if company not in [
+        "tensitron",
+        "cianflone",
+        "kingtester",
+    ]:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid company."
+        )
+
+    if entity not in [
+        "persons",
+        "organizations",
+    ]:
+        raise HTTPException(
+            status_code=400,
+            detail="entity must be persons or organizations"
+        )
+
+    return merge_duplicates(company, entity)
 
 @app.get("/get-deal-ids-with-stage-ids")
 def get_deal_ids_with_stage_ids():
