@@ -173,3 +173,25 @@ def merge_duplicates(company, entity):
         "failed": failed,
         "failed_groups": failed_groups,
     }
+
+def merge_all():
+
+    results = []
+
+    for company in DOMAINS:
+
+        print("\n")
+        print("#" * 80)
+        print(f"STARTING {company.upper()}")
+        print("#" * 80)
+
+        for entity in ["persons", "organizations"]:
+
+            results.append(
+                merge_duplicates(company, entity)
+            )
+
+    return {
+        "message": "Completed duplicate merge for all companies.",
+        "results": results
+    }
