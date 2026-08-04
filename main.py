@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+
 from typing import List, Dict, Any
 from fastapi.responses import FileResponse
 import os
@@ -28,10 +29,14 @@ from upload_to_fireflies import upload_to_the_fireflies
 from FINAL_merge_all_three import merge_all
 
 
+from scrap_company import scrape_website
 
 
 
 
+
+class ScrapeRequest(BaseModel):
+   website: str
 
 class UploadContactsRequest(BaseModel):
     contacts: List[Dict[str, Any]]
@@ -59,10 +64,17 @@ class DownloadRequest(BaseModel):
 class FirefliesRequest(BaseModel):
     files: list
 
+@app.post("/scrap_company_website")
+def scrap_company(request: ScrapeRequest):
+    result = scrape_website(request.website)
+    return result
+
 
 @app.post("/merge-duplicates-allKTC")
 def merge_duplicate_endpoint():
     return merge_all()
+
+
 
 @app.get("/get-deal-ids-with-stage-ids")
 def get_deal_ids_with_stage_ids():
