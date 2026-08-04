@@ -1,13 +1,16 @@
-#!/usr/bin/env python3
-
-import requests
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import requests
+
+app = FastAPI(title="Company Website Scraper")
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 Chrome/126.0 Safari/537.36"
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/126.0 Safari/537.36"
     )
 }
 
@@ -18,26 +21,32 @@ PAGES = [
     "company",
     "products",
     "services",
-    "contact"
+    "contact",
 ]
 
 
-def clean_text(html):
+class ScrapeRequest(BaseModel):
+    website: str
+
+
+def clean_html(html: str) -> str:
     soup = BeautifulSoup(html, "html.parser")
 
-    # Remove unnecessary tags
-    for tag in soup(["script", "style", "noscript", "svg", "footer", "header"]):
+    for tag in soup([
+        "script",
+        "style",
+        "noscript",
+        "svg",
+        "iframe"
+    ]):
         tag.decompose()
 
     text = soup.get_text(separator=" ", strip=True)
 
-    # Remove extra whitespace
-    text = " ".join(text.split())
-
-    return text
+    return " ".join(text.split())
 
 
-def scrape_page(url):
+def scrape_page(url: str):
 
     try:
 
@@ -57,16 +66,21 @@ def scrape_page(url):
         if soup.title:
             title = soup.title.get_text(strip=True)
 
-        meta = ""
-        tag = soup.find("meta", attrs={"name": "description"})
-        if tag:
-            meta = tag.get("content", "")
+        meta_description = ""
 
-        content = clean_text(response.text)
+        meta = soup.find(
+            "meta",
+            attrs={"name": "description"}
+        )
+
+        if meta:
+            meta_description = meta.get("content", "")
+
+        content = clean_html(response.text)
 
         return {
             "title": title,
-            "meta": meta,
+            "meta_description": meta_description,
             "content": content
         }
 
@@ -74,46 +88,50 @@ def scrape_page(url):
         return None
 
 
-def scrape_website(base_url):
+@app.post("/scrape")
+def scrape(request: ScrapeRequest):
 
-    pages_content = []
-
-    title = ""
-    meta = ""
-
-    for page in PAGES:
-
-        url = urljoin(base_url.rstrip("/") + "/", page)
-
-        result = scrape_page(url)
-
-        if not result:
-            continue
-
-        if not title:
-            title = result["title"]
-
-        if not meta:
-            meta = result["meta"]
-
-        pages_content.append(result["content"])
-
-    return {
-        "website": base_url,
-        "title": title,
-        "meta_description": meta,
-        "content": "\n\n".join(pages_content)[:30000]
-    }
-
-
-if __name__ == "__main__":
-
-    website = input("Website: ").strip()
+    website = request.website.strip()
 
     if not website.startswith("http"):
         website = "https://" + website
 
-    result = scrape_website(website)
+    scraped_pages = []
 
-    import json
-    print(json.dumps(result, indent=2))
+    title = ""
+    meta_description = ""
+
+    collected_text = []
+
+    for page in PAGES:
+
+        url = urljoin(website.rstrip("/") + "/", page)
+
+        result = scrape_page(url)
+
+        if result is None:
+            continue
+
+        scraped_pages.append(url)
+
+        if not title:
+            title = result["title"]
+
+        if not meta_description:
+            meta_description = result["meta_description"]
+
+        collected_text.append(result["content"])
+
+    if not collected_text:
+        raise HTTPException(
+            status_code=404,
+            detail="Unable to scrape website."
+        )
+
+    return {
+        "website": website,
+        "title": title,
+        "meta_description": meta_description,
+        "pages_scraped": scraped_pages,
+        "content": "\n\n".join(collected_text)[:30000]
+    }
