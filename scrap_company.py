@@ -1,10 +1,6 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import requests
-
-app = FastAPI(title="Company Website Scraper")
 
 HEADERS = {
     "User-Agent": (
@@ -21,12 +17,8 @@ PAGES = [
     "company",
     "products",
     "services",
-    "contact",
+    "contact"
 ]
-
-
-class ScrapeRequest(BaseModel):
-    website: str
 
 
 def clean_html(html: str) -> str:
@@ -42,19 +34,16 @@ def clean_html(html: str) -> str:
         tag.decompose()
 
     text = soup.get_text(separator=" ", strip=True)
-
     return " ".join(text.split())
 
 
-def scrape_page(url: str):
+def scrape_page(session: requests.Session, url: str):
 
     try:
-
-        response = requests.get(
+        response = session.get(
             url,
-            headers=HEADERS,
             timeout=10,
-            allow_redirects=True,
+            allow_redirects=True
         )
 
         if response.status_code != 200:
@@ -62,57 +51,49 @@ def scrape_page(url: str):
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        title = ""
-        if soup.title:
-            title = soup.title.get_text(strip=True)
+        title = soup.title.get_text(strip=True) if soup.title else ""
 
         meta_description = ""
-
-        meta = soup.find(
-            "meta",
-            attrs={"name": "description"}
-        )
-
+        meta = soup.find("meta", attrs={"name": "description"})
         if meta:
             meta_description = meta.get("content", "")
-
-        content = clean_html(response.text)
 
         return {
             "title": title,
             "meta_description": meta_description,
-            "content": content
+            "content": clean_html(response.text)
         }
 
     except Exception:
         return None
 
 
-@app.post("/scrape")
-def scrape(request: ScrapeRequest):
+def scrape_website(website: str):
 
-    website = request.website.strip()
+    website = website.strip()
 
     if not website.startswith("http"):
         website = "https://" + website
 
-    scraped_pages = []
+    session = requests.Session()
+    session.headers.update(HEADERS)
 
     title = ""
     meta_description = ""
 
-    collected_text = []
+    pages_scraped = []
+    content = []
 
     for page in PAGES:
 
         url = urljoin(website.rstrip("/") + "/", page)
 
-        result = scrape_page(url)
+        result = scrape_page(session, url)
 
         if result is None:
             continue
 
-        scraped_pages.append(url)
+        pages_scraped.append(url)
 
         if not title:
             title = result["title"]
@@ -120,18 +101,12 @@ def scrape(request: ScrapeRequest):
         if not meta_description:
             meta_description = result["meta_description"]
 
-        collected_text.append(result["content"])
-
-    if not collected_text:
-        raise HTTPException(
-            status_code=404,
-            detail="Unable to scrape website."
-        )
+        content.append(result["content"])
 
     return {
         "website": website,
         "title": title,
         "meta_description": meta_description,
-        "pages_scraped": scraped_pages,
-        "content": "\n\n".join(collected_text)[:30000]
+        "pages_scraped": pages_scraped,
+        "content": "\n\n".join(content)[:30000]
     }
