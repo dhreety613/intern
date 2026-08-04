@@ -33,6 +33,15 @@ from scrap_company import scrape_website
 
 
 
+class ScrapeRequest(BaseModel):
+    website: str
+
+
+
+
+
+
+
 
 
 class ScrapeRequest(BaseModel):
@@ -66,8 +75,8 @@ class FirefliesRequest(BaseModel):
 
 @app.post("/scrap_company_website")
 def scrap_company(request: ScrapeRequest):
-    result = scrape_website(request.website)
-    return result
+    return scrape_website(request.website)
+
 
 
 @app.post("/merge-duplicates-allKTC")
