@@ -15,11 +15,11 @@ def fetch_calls():
 
     
     today = datetime.utcnow()
-    yesterday = today - timedelta(days=1)
-    week_ago = yesterday - timedelta(days=5)
+    yesterday = today - timedelta(days=9)
+    week_ago = today - timedelta(days=5)
 
-    FROM_DATE = week_ago.strftime("%Y-%m-%d")
-    TO_DATE = today.strftime("%Y-%m-%d")
+    FROM_DATE = yesterday.strftime("%Y-%m-%d")
+    TO_DATE = week_ago.strftime("%Y-%m-%d")
 
     LIMIT = 500
     page = 1

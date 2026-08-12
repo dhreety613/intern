@@ -15,7 +15,7 @@ VALID_TYPES = {
     "outbound"
 }
 
-MIN_DURATION = 180
+MIN_DURATION = 119
 
 
 def filter_the_calls(calls):
