@@ -336,10 +336,20 @@ async def elevenlabs_chat_completions(
 
     if not call_id:
 
-        raise HTTPException(
-            status_code=400,
-            detail="Missing call_id."
-        )
+     return {
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Connection successful."
+                },
+                "finish_reason": "stop",
+            }
+        ],
+    }
 
     # --------------------------------------------------------
     # Find latest USER message
