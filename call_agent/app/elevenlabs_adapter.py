@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict
 
-from app.call import CallSession
+from call_agent.app.call import CallSession
 
 
 # ------------------------------------------------------------

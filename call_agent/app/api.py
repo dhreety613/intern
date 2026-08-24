@@ -1,6 +1,6 @@
 import json
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -59,16 +59,17 @@ class ChatCompletionRequest(BaseModel):
 
     model: str = "call-layer"
 
-    user_id: str
+    user_id: Optional[str] = None
 
     stream: bool = True
 
-    messages: List[ChatMessage]
+    messages: List[ChatMessage] = Field(
+        default_factory=list
+    )
 
     elevenlabs_extra_body: Dict[str, Any] = Field(
         default_factory=dict
     )
-
 
 # ============================================================
 # HEALTH
