@@ -67,7 +67,7 @@ class CallSession:
     def start(self) -> str:
 
         opening = (
-            "Hi, this is Anne from KTC Instruments. "
+            "Hi, this is Anne from KTC Instruments, calling to confirm your contact details registered with us. "
             f"Am I speaking with "
             f"{self.state['customer_name']}?"
         )
