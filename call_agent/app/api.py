@@ -1,8 +1,10 @@
 import json
-from typing import Dict, List
 
-from fastapi import APIRouter, HTTPException, Request
+from typing import Any, Dict, List
+
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+
 from pydantic import BaseModel, Field
 
 from call_agent.app.call import CallSession
@@ -14,14 +16,14 @@ router = APIRouter(
 
 
 # ============================================================
-# IN-MEMORY CALL SESSIONS
+# SESSION STORE
 # ============================================================
 
 sessions: Dict[str, CallSession] = {}
 
 
 # ============================================================
-# REQUEST SCHEMAS
+# SCHEMAS
 # ============================================================
 
 class StartCallRequest(BaseModel):
@@ -41,6 +43,31 @@ class CustomerMessageRequest(BaseModel):
 
     session_id: str
     message: str
+
+
+# ------------------------------------------------------------
+# ElevenLabs / OpenAI-compatible request
+# ------------------------------------------------------------
+
+class ChatMessage(BaseModel):
+
+    role: str
+    content: str
+
+
+class ChatCompletionRequest(BaseModel):
+
+    model: str = "call-layer"
+
+    user_id: str
+
+    stream: bool = True
+
+    messages: List[ChatMessage]
+
+    elevenlabs_extra_body: Dict[str, Any] = Field(
+        default_factory=dict
+    )
 
 
 # ============================================================
@@ -80,7 +107,8 @@ def start_call(
 
         phone_number=request.phone_number,
 
-        calibration_dates=request.calibration_dates,
+        calibration_dates=
+            request.calibration_dates,
     )
 
     sessions[
@@ -143,6 +171,8 @@ def customer_message(
         request.message
     )
 
+    decision = result["decision"]
+
     return {
 
         "session_id":
@@ -152,24 +182,24 @@ def customer_message(
             result["response"],
 
         "present_task":
-            result["decision"].get(
+            decision.get(
                 "present_task"
             ),
 
         "needs_context":
-            result["decision"].get(
+            decision.get(
                 "needs_context",
                 False
             ),
 
         "topic_diversion":
-            result["decision"].get(
+            decision.get(
                 "topic_diversion",
                 False
             ),
 
         "random_conversation":
-            result["decision"].get(
+            decision.get(
                 "random_conversation",
                 False
             ),
@@ -186,7 +216,7 @@ def customer_message(
 
 
 # ============================================================
-# DEBUG SESSION
+# GET SESSION
 # ============================================================
 
 @router.get("/session/{session_id}")
@@ -244,15 +274,19 @@ def delete_session(
 #
 # THIS IS THE ONLY ENDPOINT ELEVENLABS USES.
 #
-# One call_id = one CallSession.
-#
-# First request:
-#     create CallSession
-#     call session.start()
-#
-# Later requests:
-#     retrieve SAME CallSession
-#     call session.process()
+# ONE call_id
+#      ↓
+# ONE CallSession
+#      ↓
+# start()
+#      ↓
+# process()
+#      ↓
+# process()
+#      ↓
+# ...
+#      ↓
+# call_ended
 #
 # ============================================================
 
@@ -260,20 +294,16 @@ def delete_session(
     "/v1/chat/completions"
 )
 async def elevenlabs_chat_completions(
-    request: Request,
+    request: ChatCompletionRequest,
 ):
 
-    body = await request.json()
+    # --------------------------------------------------------
+    # Extract request
+    # --------------------------------------------------------
 
-    messages = body.get(
-        "messages",
-        []
-    )
+    messages = request.messages
 
-    extra = body.get(
-        "elevenlabs_extra_body",
-        {}
-    )
+    extra = request.elevenlabs_extra_body
 
     call_id = extra.get(
         "call_id"
@@ -311,74 +341,75 @@ async def elevenlabs_chat_completions(
         )
 
     # --------------------------------------------------------
-    # Find the latest customer message
+    # Find latest USER message
     # --------------------------------------------------------
 
     user_message = ""
 
     for message in reversed(messages):
 
-        if message.get("role") == "user":
+        if message.role == "user":
 
-            content = message.get(
-                "content",
-                ""
-            )
-
-            if isinstance(
-                content,
-                str
-            ):
-
-                user_message = content
+            user_message = message.content
 
             break
 
     # --------------------------------------------------------
-    # ONE SESSION PER CALL
+    # FIND EXISTING SESSION
     # --------------------------------------------------------
 
     session = sessions.get(
         call_id
     )
 
-    # --------------------------------------------------------
-    # FIRST REQUEST = START CALL
-    # --------------------------------------------------------
+    # ========================================================
+    # FIRST REQUEST OF CALL
+    # ========================================================
 
     if session is None:
 
         session = CallSession(
 
-            customer_name=customer_name,
+            customer_name=
+                customer_name,
 
-            email=email,
+            email=
+                email,
 
-            phone_number=phone_number,
+            phone_number=
+                phone_number,
 
-            calibration_dates=(
+            calibration_dates=
                 calibration_dates
                 if isinstance(
                     calibration_dates,
                     list
                 )
-                else [str(calibration_dates)]
-            ),
+                else [
+                    str(calibration_dates)
+                ],
         )
 
         sessions[
             call_id
         ] = session
 
+        # IMPORTANT:
+        # First request starts the call.
+        # We do NOT run the graph yet.
+
         response_text = session.start()
 
         call_ended = False
 
-    # --------------------------------------------------------
-    # EXISTING CALL = PROCESS MESSAGE
-    # --------------------------------------------------------
+    # ========================================================
+    # EXISTING CALL
+    # ========================================================
 
     else:
+
+        # No customer message means there is nothing
+        # to send through the graph.
 
         if not user_message:
 
@@ -403,11 +434,15 @@ async def elevenlabs_chat_completions(
                 "call_ended"
             ]
 
-    # --------------------------------------------------------
-    # OPENAI-COMPATIBLE SSE
-    # --------------------------------------------------------
+    # ========================================================
+    # SSE RESPONSE
+    # ========================================================
 
     async def event_stream():
+
+        # ----------------------------------------------------
+        # Response content
+        # ----------------------------------------------------
 
         chunk = {
 
@@ -421,7 +456,8 @@ async def elevenlabs_chat_completions(
 
                 {
 
-                    "index": 0,
+                    "index":
+                        0,
 
                     "delta": {
 
@@ -444,6 +480,10 @@ async def elevenlabs_chat_completions(
             + "\n\n"
         )
 
+        # ----------------------------------------------------
+        # Final chunk
+        # ----------------------------------------------------
+
         final_chunk = {
 
             "id":
@@ -456,9 +496,11 @@ async def elevenlabs_chat_completions(
 
                 {
 
-                    "index": 0,
+                    "index":
+                        0,
 
-                    "delta": {},
+                    "delta":
+                        {},
 
                     "finish_reason":
                         "stop",

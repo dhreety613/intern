@@ -45,27 +45,31 @@ class CallSession:
             "call_ended": False,
         }
 
+    # ========================================================
+    # ADD MESSAGE
+    # ========================================================
+
     def add_message(
         self,
         role: str,
         content: str,
     ):
+
         self.state["conversation"].append({
             "role": role,
             "content": content,
         })
 
-    def start(self) -> str:
-        """
-        Start one complete call session.
+    # ========================================================
+    # START CALL
+    # ========================================================
 
-        This is the same opening previously hardcoded
-        inside graph_manual.py.
-        """
+    def start(self) -> str:
 
         opening = (
             "Hi, this is Anne from KTC Instruments. "
-            f"Am I speaking with {self.state['customer_name']}?"
+            f"Am I speaking with "
+            f"{self.state['customer_name']}?"
         )
 
         self.add_message(
@@ -75,6 +79,10 @@ class CallSession:
 
         return opening
 
+    # ========================================================
+    # PROCESS CUSTOMER MESSAGE
+    # ========================================================
+
     def process(
         self,
         user_message: str,
@@ -82,6 +90,9 @@ class CallSession:
 
         self.state["user_message"] = user_message
 
+        # IMPORTANT:
+        # Customer message enters conversation BEFORE
+        # Brain / Memory / Decision run.
         self.add_message(
             "user",
             user_message
@@ -91,6 +102,7 @@ class CallSession:
             self.state
         )
 
+        # Update persistent session state
         self.state.update(result)
 
         decision = result.get(
@@ -103,45 +115,55 @@ class CallSession:
             ""
         )
 
+        # Add Anne's response to conversation
         if response:
+
             self.add_message(
                 "assistant",
                 response
             )
 
         return {
-            "response": response,
 
-            "decision": decision,
+            "response":
+                response,
 
-            "brain": result.get(
-                "brain_output",
-                {}
-            ),
+            "decision":
+                decision,
 
-            "progress": result.get(
-                "progress",
-                {}
-            ),
-
-            "memory": result.get(
-                "memory",
-                self.state.get(
-                    "memory",
+            "brain":
+                result.get(
+                    "brain_output",
                     {}
-                )
-            ),
+                ),
 
-            "current_stage": result.get(
-                "current_stage",
-                self.state.get(
+            "progress":
+                result.get(
+                    "progress",
+                    {}
+                ),
+
+            "memory":
+                result.get(
+                    "memory",
+                    self.state.get(
+                        "memory",
+                        {}
+                    )
+                ),
+
+            "current_stage":
+                result.get(
                     "current_stage",
-                    ""
-                )
-            ),
+                    self.state.get(
+                        "current_stage",
+                        ""
+                    )
+                ),
 
-            "call_ended": result.get(
-                "call_ended",
-                False
-            ),
+            "call_ended":
+                result.get(
+                    "call_ended",
+                    False
+                ),
         }
