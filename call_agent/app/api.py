@@ -1,36 +1,31 @@
-from typing import Dict, List, Optional
+import json
+from typing import Dict, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from call_agent.app.call import CallSession
-
-from call_agent.app.elevenlabs_adapter import (
-    ChatCompletionRequest,
-    elevenlabs_chat_completion,
-)
-
-
 
 
 router = APIRouter(
     tags=["Call Agent"]
 )
 
-@router.post("/v1/chat/completions")
-async def elevenlabs_llm(
-    request: ChatCompletionRequest,
-):
-    return await elevenlabs_chat_completion(
-        request
-    )
+
+# ============================================================
+# IN-MEMORY CALL SESSIONS
+# ============================================================
+
+sessions: Dict[str, CallSession] = {}
 
 
 # ============================================================
-# REQUEST / RESPONSE SCHEMAS
+# REQUEST SCHEMAS
 # ============================================================
 
 class StartCallRequest(BaseModel):
+
     session_id: str
 
     customer_name: str
@@ -43,20 +38,9 @@ class StartCallRequest(BaseModel):
 
 
 class CustomerMessageRequest(BaseModel):
+
     session_id: str
     message: str
-
-
-# ============================================================
-# TEMPORARY IN-MEMORY SESSION STORE
-# ============================================================
-#
-# This is fine for the first Render deployment/test.
-# Later, for production/concurrent calls, we will move state
-# to a persistent store keyed by ElevenLabs conversation ID.
-#
-
-sessions: Dict[str, CallSession] = {}
 
 
 # ============================================================
@@ -65,6 +49,7 @@ sessions: Dict[str, CallSession] = {}
 
 @router.get("/health")
 def call_agent_health():
+
     return {
         "service": "call-agent",
         "status": "healthy",
@@ -81,15 +66,20 @@ def start_call(
 ):
 
     if request.session_id in sessions:
+
         raise HTTPException(
             status_code=409,
             detail="Session already exists."
         )
 
     session = CallSession(
+
         customer_name=request.customer_name,
+
         email=request.email,
+
         phone_number=request.phone_number,
+
         calibration_dates=request.calibration_dates,
     )
 
@@ -97,20 +87,18 @@ def start_call(
         request.session_id
     ] = session
 
-    opening = (
-        "Hi, this is Anne from KTC Instruments. "
-        f"Am I speaking with {request.customer_name}?"
-    )
-
-    session.add_message(
-        "assistant",
-        opening
-    )
+    opening = session.start()
 
     return {
-        "session_id": request.session_id,
-        "response": opening,
-        "call_ended": False,
+
+        "session_id":
+            request.session_id,
+
+        "response":
+            opening,
+
+        "call_ended":
+            False,
     }
 
 
@@ -128,6 +116,7 @@ def customer_message(
     )
 
     if session is None:
+
         raise HTTPException(
             status_code=404,
             detail="Session not found."
@@ -137,12 +126,14 @@ def customer_message(
         "call_ended",
         False
     ):
+
         raise HTTPException(
             status_code=400,
             detail="Call has already ended."
         )
 
     if not request.message.strip():
+
         raise HTTPException(
             status_code=400,
             detail="Message cannot be empty."
@@ -153,6 +144,7 @@ def customer_message(
     )
 
     return {
+
         "session_id":
             request.session_id,
 
@@ -194,7 +186,7 @@ def customer_message(
 
 
 # ============================================================
-# DEBUG / TEST STATE
+# DEBUG SESSION
 # ============================================================
 
 @router.get("/session/{session_id}")
@@ -207,6 +199,7 @@ def get_session(
     )
 
     if session is None:
+
         raise HTTPException(
             status_code=404,
             detail="Session not found."
@@ -225,6 +218,7 @@ def delete_session(
 ):
 
     if session_id not in sessions:
+
         raise HTTPException(
             status_code=404,
             detail="Session not found."
@@ -235,6 +229,264 @@ def delete_session(
     ]
 
     return {
-        "session_id": session_id,
-        "deleted": True,
+
+        "session_id":
+            session_id,
+
+        "deleted":
+            True,
     }
+
+
+# ============================================================
+# ELEVENLABS ADAPTER
+# ============================================================
+#
+# THIS IS THE ONLY ENDPOINT ELEVENLABS USES.
+#
+# One call_id = one CallSession.
+#
+# First request:
+#     create CallSession
+#     call session.start()
+#
+# Later requests:
+#     retrieve SAME CallSession
+#     call session.process()
+#
+# ============================================================
+
+@router.post(
+    "/v1/chat/completions"
+)
+async def elevenlabs_chat_completions(
+    request: Request,
+):
+
+    body = await request.json()
+
+    messages = body.get(
+        "messages",
+        []
+    )
+
+    extra = body.get(
+        "elevenlabs_extra_body",
+        {}
+    )
+
+    call_id = extra.get(
+        "call_id"
+    )
+
+    customer_name = extra.get(
+        "customer_name",
+        ""
+    )
+
+    email = extra.get(
+        "email",
+        ""
+    )
+
+    phone_number = extra.get(
+        "phone_number",
+        ""
+    )
+
+    calibration_dates = extra.get(
+        "calibration_dates",
+        []
+    )
+
+    # --------------------------------------------------------
+    # Validate call ID
+    # --------------------------------------------------------
+
+    if not call_id:
+
+        raise HTTPException(
+            status_code=400,
+            detail="Missing call_id."
+        )
+
+    # --------------------------------------------------------
+    # Find the latest customer message
+    # --------------------------------------------------------
+
+    user_message = ""
+
+    for message in reversed(messages):
+
+        if message.get("role") == "user":
+
+            content = message.get(
+                "content",
+                ""
+            )
+
+            if isinstance(
+                content,
+                str
+            ):
+
+                user_message = content
+
+            break
+
+    # --------------------------------------------------------
+    # ONE SESSION PER CALL
+    # --------------------------------------------------------
+
+    session = sessions.get(
+        call_id
+    )
+
+    # --------------------------------------------------------
+    # FIRST REQUEST = START CALL
+    # --------------------------------------------------------
+
+    if session is None:
+
+        session = CallSession(
+
+            customer_name=customer_name,
+
+            email=email,
+
+            phone_number=phone_number,
+
+            calibration_dates=(
+                calibration_dates
+                if isinstance(
+                    calibration_dates,
+                    list
+                )
+                else [str(calibration_dates)]
+            ),
+        )
+
+        sessions[
+            call_id
+        ] = session
+
+        response_text = session.start()
+
+        call_ended = False
+
+    # --------------------------------------------------------
+    # EXISTING CALL = PROCESS MESSAGE
+    # --------------------------------------------------------
+
+    else:
+
+        if not user_message:
+
+            response_text = ""
+
+            call_ended = session.state.get(
+                "call_ended",
+                False
+            )
+
+        else:
+
+            result = session.process(
+                user_message
+            )
+
+            response_text = result[
+                "response"
+            ]
+
+            call_ended = result[
+                "call_ended"
+            ]
+
+    # --------------------------------------------------------
+    # OPENAI-COMPATIBLE SSE
+    # --------------------------------------------------------
+
+    async def event_stream():
+
+        chunk = {
+
+            "id":
+                f"chatcmpl-{call_id}",
+
+            "object":
+                "chat.completion.chunk",
+
+            "choices": [
+
+                {
+
+                    "index": 0,
+
+                    "delta": {
+
+                        "role":
+                            "assistant",
+
+                        "content":
+                            response_text,
+                    },
+
+                    "finish_reason":
+                        None,
+                }
+            ],
+        }
+
+        yield (
+            "data: "
+            + json.dumps(chunk)
+            + "\n\n"
+        )
+
+        final_chunk = {
+
+            "id":
+                f"chatcmpl-{call_id}",
+
+            "object":
+                "chat.completion.chunk",
+
+            "choices": [
+
+                {
+
+                    "index": 0,
+
+                    "delta": {},
+
+                    "finish_reason":
+                        "stop",
+                }
+            ],
+        }
+
+        yield (
+            "data: "
+            + json.dumps(final_chunk)
+            + "\n\n"
+        )
+
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+
+        event_stream(),
+
+        media_type=
+            "text/event-stream",
+
+        headers={
+
+            "Cache-Control":
+                "no-cache",
+
+            "Connection":
+                "keep-alive",
+        },
+    )

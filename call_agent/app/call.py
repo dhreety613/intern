@@ -16,20 +16,12 @@ class CallSession:
         self.state: Dict[str, Any] = {
 
             "conversation": [],
-
             "context": [],
 
-            "customer_name":
-                customer_name,
-
-            "email":
-                email,
-
-            "phone_number":
-                phone_number,
-
-            "calibration_dates":
-                calibration_dates,
+            "customer_name": customer_name,
+            "email": email,
+            "phone_number": phone_number,
+            "calibration_dates": calibration_dates,
 
             "memory": {},
 
@@ -40,11 +32,9 @@ class CallSession:
                 "calibration_completed": False,
             },
 
-            "current_stage":
-                "name_confirmation",
+            "current_stage": "name_confirmation",
 
             "brain_output": {},
-
             "decision": {},
 
             "call_progress": {
@@ -52,43 +42,46 @@ class CallSession:
                 "random_conversation_count": 0,
             },
 
-            "call_ended":
-                False,
+            "call_ended": False,
         }
-
-    # --------------------------------------------------------
-    # Add conversation turn
-    # --------------------------------------------------------
 
     def add_message(
         self,
         role: str,
         content: str,
     ):
+        self.state["conversation"].append({
+            "role": role,
+            "content": content,
+        })
 
-        self.state[
-            "conversation"
-        ].append(
-            {
-                "role": role,
-                "content": content,
-            }
+    def start(self) -> str:
+        """
+        Start one complete call session.
+
+        This is the same opening previously hardcoded
+        inside graph_manual.py.
+        """
+
+        opening = (
+            "Hi, this is Anne from KTC Instruments. "
+            f"Am I speaking with {self.state['customer_name']}?"
         )
 
-    # --------------------------------------------------------
-    # Process customer message
-    # --------------------------------------------------------
+        self.add_message(
+            "assistant",
+            opening
+        )
+
+        return opening
 
     def process(
         self,
         user_message: str,
     ) -> Dict[str, Any]:
 
-        self.state[
-            "user_message"
-        ] = user_message
+        self.state["user_message"] = user_message
 
-        # Add customer message BEFORE Brain runs.
         self.add_message(
             "user",
             user_message
@@ -98,13 +91,7 @@ class CallSession:
             self.state
         )
 
-        # ----------------------------------------------------
-        # Update local state
-        # ----------------------------------------------------
-
-        self.state.update(
-            result
-        )
+        self.state.update(result)
 
         decision = result.get(
             "decision",
@@ -116,57 +103,45 @@ class CallSession:
             ""
         )
 
-        # ----------------------------------------------------
-        # Add Anne's response to conversation
-        # ----------------------------------------------------
-
         if response:
-
             self.add_message(
                 "assistant",
                 response
             )
 
         return {
-            "response":
-                response,
+            "response": response,
 
-            "decision":
-                decision,
+            "decision": decision,
 
-            "brain":
-                result.get(
-                    "brain_output",
-                    {}
-                ),
+            "brain": result.get(
+                "brain_output",
+                {}
+            ),
 
-            "progress":
-                result.get(
-                    "progress",
-                    {}
-                ),
+            "progress": result.get(
+                "progress",
+                {}
+            ),
 
-            "memory":
-                result.get(
+            "memory": result.get(
+                "memory",
+                self.state.get(
                     "memory",
-                    self.state.get(
-                        "memory",
-                        {}
-                    )
-                ),
+                    {}
+                )
+            ),
 
-            "current_stage":
-                result.get(
+            "current_stage": result.get(
+                "current_stage",
+                self.state.get(
                     "current_stage",
-                    self.state.get(
-                        "current_stage",
-                        ""
-                    )
-                ),
+                    ""
+                )
+            ),
 
-            "call_ended":
-                result.get(
-                    "call_ended",
-                    False
-                ),
+            "call_ended": result.get(
+                "call_ended",
+                False
+            ),
         }
