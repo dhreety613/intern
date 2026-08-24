@@ -1,4 +1,5 @@
 import json
+import re
 
 from typing import Any, Dict, List, Optional
 
@@ -291,44 +292,84 @@ def delete_session(
 #
 # ============================================================
 
-@router.post(
-    "/v1/chat/completions"
-)
+@router.post("/v1/chat/completions")
 async def elevenlabs_chat_completions(
     request: ChatCompletionRequest,
 ):
 
-    # --------------------------------------------------------
-    # Extract request
-    # --------------------------------------------------------
-
     messages = request.messages
 
-    extra = request.elevenlabs_extra_body
+    # --------------------------------------------------------
+    # CALL ID
+    # ElevenLabs user_id becomes our call/session ID.
+    # --------------------------------------------------------
 
-    call_id = extra.get(
-        "call_id"
-    )
+    call_id = request.user_id
 
-    customer_name = extra.get(
-        "customer_name",
-        ""
-    )
+    # --------------------------------------------------------
+    # Extract customer information from system message
+    # --------------------------------------------------------
 
-    email = extra.get(
-        "email",
-        ""
-    )
+    customer_name = ""
+    email = ""
+    phone_number = ""
+    calibration_dates = []
 
-    phone_number = extra.get(
-        "phone_number",
-        ""
-    )
+    for message in messages:
 
-    calibration_dates = extra.get(
-        "calibration_dates",
-        []
-    )
+        if message.role != "system":
+            continue
+
+        content = message.content
+
+        name_match = re.search(
+            r"Name:\s*(.+)",
+            content,
+            re.IGNORECASE,
+        )
+
+        email_match = re.search(
+            r"Email:\s*(.+)",
+            content,
+            re.IGNORECASE,
+        )
+
+        phone_match = re.search(
+            r"Phone:\s*(.+)",
+            content,
+            re.IGNORECASE,
+        )
+
+        calibration_match = re.search(
+            r"Calibration date:\s*(.+)",
+            content,
+            re.IGNORECASE,
+        )
+
+        call_id_match = re.search(
+            r"Call ID:\s*(.+)",
+            content,
+            re.IGNORECASE,
+        )
+
+        if name_match:
+            customer_name = name_match.group(1).strip()
+
+        if email_match:
+            email = email_match.group(1).strip()
+
+        if phone_match:
+            phone_number = phone_match.group(1).strip()
+
+        if calibration_match:
+            calibration_dates = [
+                calibration_match.group(1).strip()
+            ]
+
+        # Prefer explicit Call ID from the system prompt
+        # if ElevenLabs supplied one.
+        if call_id_match:
+            call_id = call_id_match.group(1).strip()
 
     # --------------------------------------------------------
     # Validate call ID
@@ -336,23 +377,13 @@ async def elevenlabs_chat_completions(
 
     if not call_id:
 
-     return {
-        "id": "chatcmpl-test",
-        "object": "chat.completion",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": "Connection successful."
-                },
-                "finish_reason": "stop",
-            }
-        ],
-    }
+        raise HTTPException(
+            status_code=400,
+            detail="Missing call ID."
+        )
 
     # --------------------------------------------------------
-    # Find latest USER message
+    # Find latest CUSTOMER message
     # --------------------------------------------------------
 
     user_message = ""
@@ -374,40 +405,28 @@ async def elevenlabs_chat_completions(
     )
 
     # ========================================================
-    # FIRST REQUEST OF CALL
+    # FIRST REQUEST
     # ========================================================
 
     if session is None:
 
         session = CallSession(
 
-            customer_name=
-                customer_name,
+            customer_name=customer_name,
 
-            email=
-                email,
+            email=email,
 
-            phone_number=
-                phone_number,
+            phone_number=phone_number,
 
-            calibration_dates=
-                calibration_dates
-                if isinstance(
-                    calibration_dates,
-                    list
-                )
-                else [
-                    str(calibration_dates)
-                ],
+            calibration_dates=calibration_dates,
         )
 
         sessions[
             call_id
         ] = session
 
-        # IMPORTANT:
         # First request starts the call.
-        # We do NOT run the graph yet.
+        # Do NOT run LangGraph yet.
 
         response_text = session.start()
 
@@ -418,9 +437,6 @@ async def elevenlabs_chat_completions(
     # ========================================================
 
     else:
-
-        # No customer message means there is nothing
-        # to send through the graph.
 
         if not user_message:
 
@@ -450,10 +466,6 @@ async def elevenlabs_chat_completions(
     # ========================================================
 
     async def event_stream():
-
-        # ----------------------------------------------------
-        # Response content
-        # ----------------------------------------------------
 
         chunk = {
 
@@ -491,10 +503,6 @@ async def elevenlabs_chat_completions(
             + "\n\n"
         )
 
-        # ----------------------------------------------------
-        # Final chunk
-        # ----------------------------------------------------
-
         final_chunk = {
 
             "id":
@@ -531,15 +539,10 @@ async def elevenlabs_chat_completions(
 
         event_stream(),
 
-        media_type=
-            "text/event-stream",
+        media_type="text/event-stream",
 
         headers={
-
-            "Cache-Control":
-                "no-cache",
-
-            "Connection":
-                "keep-alive",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
         },
     )
