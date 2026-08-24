@@ -68,7 +68,7 @@ class ChatCompletionRequest(BaseModel):
         default_factory=list
     )
 
-    elevenlabs_extra_body: Dict[str, Any] = Field(
+    custom_llm_extra_body: Dict[str, Any] = Field(
         default_factory=dict
     )
 
@@ -300,76 +300,36 @@ async def elevenlabs_chat_completions(
     messages = request.messages
 
     # --------------------------------------------------------
-    # CALL ID
-    # ElevenLabs user_id becomes our call/session ID.
-    # --------------------------------------------------------
+# --------------------------------------------------------
+# CUSTOM PAYLOAD FROM ELEVENLABS
+# --------------------------------------------------------
 
-    call_id = request.user_id
+    extra = request.custom_llm_extra_body
 
-    # --------------------------------------------------------
-    # Extract customer information from system message
-    # --------------------------------------------------------
+    call_id = extra.get(
+        "call_id"
+    )
 
-    customer_name = ""
-    email = ""
-    phone_number = ""
-    calibration_dates = []
+    customer_name = extra.get(
+    "customer_name",
+    ""
+)
 
-    for message in messages:
+    email = extra.get(
+    "email",
+    ""
+)
 
-        if message.role != "system":
-            continue
+    phone_number = extra.get(
+    "phone_number",
+    ""
+)
 
-        content = message.content
+    calibration_dates = extra.get(
+    "calibration_dates",
+    []
+)
 
-        name_match = re.search(
-            r"Name:\s*(.+)",
-            content,
-            re.IGNORECASE,
-        )
-
-        email_match = re.search(
-            r"Email:\s*(.+)",
-            content,
-            re.IGNORECASE,
-        )
-
-        phone_match = re.search(
-            r"Phone:\s*(.+)",
-            content,
-            re.IGNORECASE,
-        )
-
-        calibration_match = re.search(
-            r"Calibration date:\s*(.+)",
-            content,
-            re.IGNORECASE,
-        )
-
-        call_id_match = re.search(
-            r"Call ID:\s*(.+)",
-            content,
-            re.IGNORECASE,
-        )
-
-        if name_match:
-            customer_name = name_match.group(1).strip()
-
-        if email_match:
-            email = email_match.group(1).strip()
-
-        if phone_match:
-            phone_number = phone_match.group(1).strip()
-
-        if calibration_match:
-            calibration_dates = [
-                calibration_match.group(1).strip()
-            ]
-
-        # Prefer explicit Call ID from the system prompt
-        # if ElevenLabs supplied one.
-        if call_id_match:
-            call_id = call_id_match.group(1).strip()
 
     # --------------------------------------------------------
     # Validate call ID
