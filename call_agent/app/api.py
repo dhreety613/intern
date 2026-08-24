@@ -3,6 +3,7 @@ import re
 
 from typing import Any, Dict, List, Optional
 
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -44,6 +45,31 @@ class CustomerMessageRequest(BaseModel):
 
     session_id: str
     message: str
+
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatCompletionRequest(BaseModel):
+
+    messages: List[ChatMessage]
+
+    model: str
+
+    temperature: Optional[float] = 0.7
+
+    max_tokens: Optional[int] = None
+
+    stream: Optional[bool] = False
+
+    user_id: Optional[str] = None
+
+    custom_llm_extra_body: Dict[str, Any] = Field(
+        default_factory=dict
+    )
 
 
 # ------------------------------------------------------------
@@ -297,53 +323,42 @@ async def elevenlabs_chat_completions(
     request: ChatCompletionRequest,
 ):
 
+    # --------------------------------------------------------
+    # Standard ElevenLabs/OpenAI-compatible request
+    # --------------------------------------------------------
+
     messages = request.messages
 
     # --------------------------------------------------------
-# --------------------------------------------------------
-# CUSTOM PAYLOAD FROM ELEVENLABS
-# --------------------------------------------------------
+    # Custom data supplied during ElevenLabs call initiation
+    # --------------------------------------------------------
 
     extra = request.custom_llm_extra_body
 
-    call_id = extra.get(
-        "call_id"
-    )
+    call_id = extra.get("call_id")
 
     customer_name = extra.get(
-    "customer_name",
-    ""
-)
+        "customer_name",
+        ""
+    )
 
     email = extra.get(
-    "email",
-    ""
-)
+        "email",
+        ""
+    )
 
     phone_number = extra.get(
-    "phone_number",
-    ""
-)
+        "phone_number",
+        ""
+    )
 
     calibration_dates = extra.get(
-    "calibration_dates",
-    []
-)
-
-
-    # --------------------------------------------------------
-    # Validate call ID
-    # --------------------------------------------------------
-
-    if not call_id:
-
-        raise HTTPException(
-            status_code=400,
-            detail="Missing call ID."
-        )
+        "calibration_dates",
+        []
+    )
 
     # --------------------------------------------------------
-    # Find latest CUSTOMER message
+    # Extract latest user message
     # --------------------------------------------------------
 
     user_message = ""
@@ -356,17 +371,86 @@ async def elevenlabs_chat_completions(
 
             break
 
-    # --------------------------------------------------------
-    # FIND EXISTING SESSION
-    # --------------------------------------------------------
+    # ========================================================
+    # CONNECTION / BASIC COMPATIBILITY REQUEST
+    # ========================================================
+    #
+    # ElevenLabs may test the Custom LLM without our
+    # application-specific call_id.
+    #
+    # Do NOT reject that request.
+    #
+    # ========================================================
+
+    if not call_id:
+
+        response_text = (
+            "Hello, this is Anne from KTC Instruments."
+        )
+
+        async def connection_stream():
+
+            chunk = {
+                "id": "chatcmpl-connection-test",
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "role": "assistant",
+                            "content": response_text,
+                        },
+                        "finish_reason": None,
+                    }
+                ],
+            }
+
+            yield (
+                "data: "
+                + json.dumps(chunk)
+                + "\n\n"
+            )
+
+            final_chunk = {
+                "id": "chatcmpl-connection-test",
+                "object": "chat.completion.chunk",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+
+            yield (
+                "data: "
+                + json.dumps(final_chunk)
+                + "\n\n"
+            )
+
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(
+            connection_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+
+    # ========================================================
+    # REAL CALL
+    # ========================================================
 
     session = sessions.get(
         call_id
     )
 
-    # ========================================================
+    # --------------------------------------------------------
     # FIRST REQUEST
-    # ========================================================
+    # --------------------------------------------------------
 
     if session is None:
 
@@ -378,23 +462,33 @@ async def elevenlabs_chat_completions(
 
             phone_number=phone_number,
 
-            calibration_dates=calibration_dates,
+            calibration_dates=(
+                calibration_dates
+                if isinstance(
+                    calibration_dates,
+                    list
+                )
+                else [
+                    str(calibration_dates)
+                ]
+            ),
         )
 
         sessions[
             call_id
         ] = session
 
-        # First request starts the call.
-        # Do NOT run LangGraph yet.
+        # ----------------------------------------------------
+        # Start exactly like graph_manual.py
+        # ----------------------------------------------------
 
         response_text = session.start()
 
         call_ended = False
 
-    # ========================================================
+    # --------------------------------------------------------
     # EXISTING CALL
-    # ========================================================
+    # --------------------------------------------------------
 
     else:
 
