@@ -32,15 +32,12 @@ from FINAL_merge_all_three import merge_all
 from scrap_company import scrape_website
 
 
+from call_agent.app.api import router as call_agent_router
+
+
 
 class ScrapeRequest(BaseModel):
     website: str
-
-
-
-
-
-
 
 
 
@@ -52,6 +49,10 @@ class UploadContactsRequest(BaseModel):
 
 app = FastAPI()
 
+app.include_router(
+    call_agent_router,
+    prefix="/call-agent"
+)
 
 class FullRequest(BaseModel):
     deal_id: int
