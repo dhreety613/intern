@@ -5,10 +5,25 @@ from pydantic import BaseModel, Field
 
 from call_agent.app.call import CallSession
 
+from call_agent.app.elevenlabs_adapter import (
+    ChatCompletionRequest,
+    elevenlabs_chat_completion,
+)
+
+
+
 
 router = APIRouter(
     tags=["Call Agent"]
 )
+
+@router.post("/v1/chat/completions")
+async def elevenlabs_llm(
+    request: ChatCompletionRequest,
+):
+    return await elevenlabs_chat_completion(
+        request
+    )
 
 
 # ============================================================
