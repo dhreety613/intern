@@ -323,43 +323,34 @@ async def elevenlabs_chat_completions(
     request: ChatCompletionRequest,
 ):
 
-    # --------------------------------------------------------
-    # Standard ElevenLabs/OpenAI-compatible request
-    # --------------------------------------------------------
+    # ========================================================
+    # STANDARD ELEVENLABS REQUEST
+    # ========================================================
 
     messages = request.messages
 
-    # --------------------------------------------------------
-    # Custom data supplied during ElevenLabs call initiation
-    # --------------------------------------------------------
+    # ========================================================
+    # TEMPORARY TEST CALL DATA
+    #
+    # These values match the current n8n test call.
+    # We are NOT using custom_llm_extra_body.
+    # ========================================================
 
-    extra = request.custom_llm_extra_body
+    call_id = "test-call-001"
 
-    call_id = extra.get("call_id")
+    customer_name = "John Smith"
 
-    customer_name = extra.get(
-        "customer_name",
-        ""
-    )
+    email = "john@company.com"
 
-    email = extra.get(
-        "email",
-        ""
-    )
+    phone_number = "+1 412 555 1234"
 
-    phone_number = extra.get(
-        "phone_number",
-        ""
-    )
+    calibration_dates = [
+        "September 15, 2026"
+    ]
 
-    calibration_dates = extra.get(
-        "calibration_dates",
-        []
-    )
-
-    # --------------------------------------------------------
-    # Extract latest user message
-    # --------------------------------------------------------
+    # ========================================================
+    # FIND LATEST USER MESSAGE
+    # ========================================================
 
     user_message = ""
 
@@ -372,85 +363,14 @@ async def elevenlabs_chat_completions(
             break
 
     # ========================================================
-    # CONNECTION / BASIC COMPATIBILITY REQUEST
-    # ========================================================
-    #
-    # ElevenLabs may test the Custom LLM without our
-    # application-specific call_id.
-    #
-    # Do NOT reject that request.
-    #
+    # FIND EXISTING SESSION
     # ========================================================
 
-    if not call_id:
-
-        response_text = (
-            "Hello, this is Anne from KTC Instruments."
-        )
-
-        async def connection_stream():
-
-            chunk = {
-                "id": "chatcmpl-connection-test",
-                "object": "chat.completion.chunk",
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {
-                            "role": "assistant",
-                            "content": response_text,
-                        },
-                        "finish_reason": None,
-                    }
-                ],
-            }
-
-            yield (
-                "data: "
-                + json.dumps(chunk)
-                + "\n\n"
-            )
-
-            final_chunk = {
-                "id": "chatcmpl-connection-test",
-                "object": "chat.completion.chunk",
-                "choices": [
-                    {
-                        "index": 0,
-                        "delta": {},
-                        "finish_reason": "stop",
-                    }
-                ],
-            }
-
-            yield (
-                "data: "
-                + json.dumps(final_chunk)
-                + "\n\n"
-            )
-
-            yield "data: [DONE]\n\n"
-
-        return StreamingResponse(
-            connection_stream(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-            },
-        )
+    session = sessions.get(call_id)
 
     # ========================================================
-    # REAL CALL
-    # ========================================================
-
-    session = sessions.get(
-        call_id
-    )
-
-    # --------------------------------------------------------
     # FIRST REQUEST
-    # --------------------------------------------------------
+    # ========================================================
 
     if session is None:
 
@@ -462,33 +382,20 @@ async def elevenlabs_chat_completions(
 
             phone_number=phone_number,
 
-            calibration_dates=(
-                calibration_dates
-                if isinstance(
-                    calibration_dates,
-                    list
-                )
-                else [
-                    str(calibration_dates)
-                ]
-            ),
+            calibration_dates=calibration_dates,
         )
 
-        sessions[
-            call_id
-        ] = session
+        sessions[call_id] = session
 
-        # ----------------------------------------------------
-        # Start exactly like graph_manual.py
-        # ----------------------------------------------------
+        # Start the call and generate Anne's opening message
 
         response_text = session.start()
 
         call_ended = False
 
-    # --------------------------------------------------------
-    # EXISTING CALL
-    # --------------------------------------------------------
+    # ========================================================
+    # EXISTING SESSION
+    # ========================================================
 
     else:
 
@@ -521,6 +428,10 @@ async def elevenlabs_chat_completions(
 
     async def event_stream():
 
+        # ----------------------------------------------------
+        # Content chunk
+        # ----------------------------------------------------
+
         chunk = {
 
             "id":
@@ -533,20 +444,16 @@ async def elevenlabs_chat_completions(
 
                 {
 
-                    "index":
-                        0,
+                    "index": 0,
 
                     "delta": {
 
-                        "role":
-                            "assistant",
+                        "role": "assistant",
 
-                        "content":
-                            response_text,
+                        "content": response_text,
                     },
 
-                    "finish_reason":
-                        None,
+                    "finish_reason": None,
                 }
             ],
         }
@@ -556,6 +463,10 @@ async def elevenlabs_chat_completions(
             + json.dumps(chunk)
             + "\n\n"
         )
+
+        # ----------------------------------------------------
+        # Final chunk
+        # ----------------------------------------------------
 
         final_chunk = {
 
@@ -569,14 +480,11 @@ async def elevenlabs_chat_completions(
 
                 {
 
-                    "index":
-                        0,
+                    "index": 0,
 
-                    "delta":
-                        {},
+                    "delta": {},
 
-                    "finish_reason":
-                        "stop",
+                    "finish_reason": "stop",
                 }
             ],
         }
@@ -596,7 +504,9 @@ async def elevenlabs_chat_completions(
         media_type="text/event-stream",
 
         headers={
+
             "Cache-Control": "no-cache",
+
             "Connection": "keep-alive",
         },
     )
