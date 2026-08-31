@@ -1,13 +1,12 @@
-import hashlib
 import json
-import re
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from call_agent.app.call import CallSession
+from call_agent.app.media_stream import TwilioMediaStream
 
 
 router = APIRouter(
@@ -309,18 +308,6 @@ async def elevenlabs_chat_completions(
 
     # ========================================================
     # EXTRACT MESSAGES
-    #
-    # ElevenLabs' custom-LLM webhook re-sends the FULL
-    # conversation (system prompt + every prior turn) on
-    # EVERY call, OpenAI-chat-completions style. It does NOT
-    # forward dynamic_variables / conversation_initiation_
-    # client_data as top-level body fields the way the n8n
-    # call-start payload might suggest -- those are only used
-    # by ElevenLabs to template {{vars}} into the system
-    # prompt / first_message BEFORE the request ever reaches
-    # us. The one documented pass-through channel is
-    # `elevenlabs_extra_body`, which mirrors whatever you set
-    # as `custom_llm_extra_body` when the call was started.
     # ========================================================
 
     messages = body.get(
@@ -328,97 +315,81 @@ async def elevenlabs_chat_completions(
         []
     )
 
-    system_prompt = ""
-
-    history: List[Dict[str, str]] = []
-
-    for message in messages:
-
-        if not isinstance(message, dict):
-            continue
-
-        role = message.get("role")
-        content = message.get("content", "")
-
-        if not isinstance(content, str):
-            content = str(content)
-
-        if role == "system":
-            # There can technically be more than one; keep them all.
-            system_prompt += content + "\n"
-            continue
-
-        if role in ("user", "assistant"):
-            history.append({
-                "role": role,
-                "content": content.strip(),
-            })
-
 
     # ========================================================
     # EXTRACT DYNAMIC VARIABLES
     #
-    # Priority order reflects how ElevenLabs actually delivers
-    # data to a custom LLM server, most-likely-correct first:
-    #
-    # 1. elevenlabs_extra_body.dynamic_variables
-    #    -> what arrives if you set `custom_llm_extra_body`
-    #       (containing a `dynamic_variables` key) on the
-    #       call-start payload sent to ElevenLabs.
-    # 2. custom_llm_extra_body.dynamic_variables
-    #    -> defensive: in case ElevenLabs ever echoes the
-    #       field back under its outbound name instead.
-    # 3. conversation_initiation_client_data.dynamic_variables
-    # 4. dynamic_variables (bare, top-level)
-    #
-    # If ALL of these are empty, we fall back to scraping the
-    # already-templated system prompt text for the values --
-    # this keeps the agent working even before the n8n /
-    # ElevenLabs agent config is updated to forward
-    # custom_llm_extra_body (see reply for the config change
-    # needed to make option 1 actually fire).
+    # Supports multiple possible forwarding structures.
     # ========================================================
 
-    def _dig(source: Any, key: str) -> Dict[str, Any]:
-        if isinstance(source, dict):
-            value = source.get(key, {})
-            if isinstance(value, dict):
-                return value
-        return {}
+    dynamic_variables = {}
 
-    dynamic_variables: Dict[str, Any] = {}
 
-    for candidate in (
-        _dig(body.get("elevenlabs_extra_body"), "dynamic_variables"),
-        _dig(body.get("custom_llm_extra_body"), "dynamic_variables"),
-        _dig(body.get("conversation_initiation_client_data"), "dynamic_variables"),
-        body.get("dynamic_variables"),
+    # --------------------------------------------------------
+    # Option 1:
+    # conversation_initiation_client_data.dynamic_variables
+    # --------------------------------------------------------
+
+    initiation_data = body.get(
+        "conversation_initiation_client_data",
+        {}
+    )
+
+    if isinstance(
+        initiation_data,
+        dict
     ):
-        if isinstance(candidate, dict) and candidate:
-            dynamic_variables = candidate
-            break
 
-    used_system_prompt_fallback = False
+        dynamic_variables = initiation_data.get(
+            "dynamic_variables",
+            {}
+        )
 
-    if not dynamic_variables and system_prompt:
 
-        # Best-effort scrape of templated values out of the
-        # system prompt, in case dynamic variables never made
-        # it into the JSON body at all. Adjust these patterns
-        # to match your actual system prompt wording.
+    # --------------------------------------------------------
+    # Option 2:
+    # dynamic_variables directly in body
+    # --------------------------------------------------------
 
-        used_system_prompt_fallback = True
+    if not dynamic_variables:
 
-        def _scrape(pattern: str) -> str:
-            match = re.search(pattern, system_prompt, flags=re.IGNORECASE)
-            return match.group(1).strip() if match else ""
+        dynamic_variables = body.get(
+            "dynamic_variables",
+            {}
+        )
 
-        dynamic_variables = {
-            "customer_name": _scrape(r"customer(?:'s)? name(?: is)?[:\s]+([^\n,.]+)"),
-            "email_on_file": _scrape(r"email(?: on file)?(?: is)?[:\s]+([^\s,]+@[^\s,]+)"),
-            "number_on_file": _scrape(r"(?:phone|number)(?: on file)?(?: is)?[:\s]+(\+?[\d\s\-()]{7,})"),
-            "next_calibration_date": _scrape(r"calibration date(?: is)?[:\s]+([^\n,.]+)"),
-        }
+
+    # --------------------------------------------------------
+    # Option 3:
+    # custom_llm_extra_body
+    # --------------------------------------------------------
+
+    if not dynamic_variables:
+
+        extra_body = body.get(
+            "custom_llm_extra_body",
+            {}
+        )
+
+        if isinstance(
+            extra_body,
+            dict
+        ):
+
+            dynamic_variables = extra_body.get(
+                "dynamic_variables",
+                extra_body
+            )
+
+
+    # Make sure it is always a dictionary
+
+    if not isinstance(
+        dynamic_variables,
+        dict
+    ):
+
+        dynamic_variables = {}
 
 
     print(
@@ -427,13 +398,12 @@ async def elevenlabs_chat_completions(
             dynamic_variables,
             indent=2,
             default=str
-        ),
-        "(system-prompt fallback used)" if used_system_prompt_fallback else "",
+        )
     )
 
 
     # ========================================================
-    # EXTRACT CUSTOMER DATA
+    # EXTRACT CUSTOMER DATA FROM YOUR N8N PAYLOAD
     # ========================================================
 
     customer_name = dynamic_variables.get(
@@ -483,17 +453,10 @@ async def elevenlabs_chat_completions(
     # CREATE A SESSION ID
     #
     # Priority:
-    # 1. ElevenLabs call_id / conversation_id / user_id, IF
-    #    ElevenLabs actually sends one (not guaranteed for
-    #    custom LLM webhooks).
-    # 2. deal_id from n8n dynamic variables.
-    # 3. A stable hash of the (already-templated) system
-    #    prompt. This is unique per call, since it embeds the
-    #    customer's name/phone/etc, but IDENTICAL across every
-    #    turn of the SAME call -- so it survives ElevenLabs not
-    #    sending any explicit session identifier at all, and it
-    #    never collapses two different real calls into one
-    #    shared session the way a single hardcoded fallback did.
+    # 1. ElevenLabs call_id
+    # 2. conversation_id
+    # 3. user_id
+    # 4. deal_id from n8n
     # ========================================================
 
     call_id = (
@@ -508,19 +471,17 @@ async def elevenlabs_chat_completions(
 
     )
 
-    if not call_id and system_prompt:
 
-        call_id = "sysprompt-" + hashlib.sha1(
-            system_prompt.encode("utf-8")
-        ).hexdigest()[:16]
+    # ========================================================
+    # LAST-RESORT FALLBACK
+    #
+    # Only prevents the request from crashing while debugging.
+    # ========================================================
 
     if not call_id:
 
-        # Truly nothing to key on (no messages, no system
-        # prompt, no ids). Only happens on malformed requests.
-        call_id = "elevenlabs-fallback-" + hashlib.sha1(
-            json.dumps(body, default=str, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:16]
+        call_id = "elevenlabs-test-session"
+
 
     call_id = str(
         call_id
@@ -555,15 +516,42 @@ async def elevenlabs_chat_completions(
 
 
     # ========================================================
-    # LATEST USER MESSAGE (from the reconstructed history)
+    # FIND LATEST USER MESSAGE
     # ========================================================
 
     user_message = ""
 
-    for turn in reversed(history):
-        if turn["role"] == "user":
-            user_message = turn["content"]
+    for message in reversed(messages):
+
+        if not isinstance(
+            message,
+            dict
+        ):
+
+            continue
+
+        if message.get("role") == "user":
+
+            content = message.get(
+                "content",
+                ""
+            )
+
+            if isinstance(
+                content,
+                str
+            ):
+
+                user_message = content.strip()
+
+            else:
+
+                user_message = str(
+                    content
+                ).strip()
+
             break
+
 
     print(
         "USER MESSAGE:",
@@ -581,20 +569,7 @@ async def elevenlabs_chat_completions(
 
 
     # ========================================================
-    # FIRST REQUEST FOR THIS CALL
-    #
-    # IMPORTANT: ElevenLabs speaks its own configured
-    # first_message via TTS directly -- it does NOT call your
-    # custom LLM to generate the opening line. So by the time
-    # your webhook is hit for a brand-new call_id, `history`
-    # will usually already contain that spoken opening
-    # (role="assistant") followed by the customer's actual
-    # reply (role="user"). The old code ignored `history`
-    # entirely here and always called session.start(), which
-    # made Anne re-introduce herself instead of answering what
-    # the customer just said. We now seed the session with
-    # whatever ElevenLabs already said, then process the
-    # customer's reply immediately if one is present.
+    # FIRST REQUEST
     # ========================================================
 
     if session is None:
@@ -618,42 +593,12 @@ async def elevenlabs_chat_completions(
             call_id
         ] = session
 
-        # Seed conversation history with everything ElevenLabs
-        # already said/heard BEFORE this request, so Brain /
-        # Decision have real context on the very first turn we
-        # actually process. Exclude the trailing user message
-        # (if any) -- session.process() below adds that itself.
-        seed_turns = history[:-1] if (history and history[-1]["role"] == "user") else history
 
-        for turn in seed_turns:
-            session.add_message(turn["role"], turn["content"])
+        # Generate Anne's opening statement
 
-        if user_message:
+        response_text = session.start()
 
-            result = session.process(
-                user_message
-            )
-
-            response_text = result.get(
-                "response",
-                ""
-            )
-
-            call_ended = result.get(
-                "call_ended",
-                False
-            )
-
-        else:
-
-            # No customer turn yet at all -- this is a true
-            # cold start where OUR LLM is responsible for the
-            # opening line (e.g. ElevenLabs first_message left
-            # blank). Generate it exactly as locally.
-
-            response_text = session.start()
-
-            call_ended = False
+        call_ended = False
 
 
     # ========================================================
@@ -812,3 +757,53 @@ async def elevenlabs_chat_completions(
                 "keep-alive",
         },
     )
+
+
+# ============================================================
+# TWILIO MEDIA STREAMS (WEBSOCKET - VOICE AGENT)
+# ============================================================
+
+@router.websocket("/media")
+async def twilio_media_stream(
+    websocket: WebSocket,
+    customer_name: str = "Customer",
+    email: str = "",
+    phone_number: str = "",
+    deal_id: str = "",
+):
+    """
+    WebSocket endpoint for Twilio Media Streams.
+    
+    Handles real-time bidirectional audio:
+    - Receive caller audio (8kHz LINEAR16)
+    - STT → Google Cloud Speech-to-Text
+    - Agent → Your LangGraph CallSession
+    - TTS → ElevenLabs API
+    - Stream audio back to caller
+    
+    Connect from Twilio:
+    wss://your-server/media?customer_name=Jane&email=john@company.com&phone_number=+1234567890
+    """
+
+    await websocket.accept()
+
+    try:
+        handler = TwilioMediaStream(
+            websocket=websocket,
+            customer_name=customer_name or "Customer",
+            email=email or "",
+            phone_number=phone_number or "",
+            calibration_dates=[],
+        )
+
+        await handler.handle()
+
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected: {deal_id or 'unknown'}")
+
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+        try:
+            await websocket.close()
+        except:
+            pass
