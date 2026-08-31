@@ -12,20 +12,12 @@ uvicorn==0.24.0
 pydantic==2.5.0
 python-dotenv==1.0.0
 
-# LangGraph and LLM
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+python-dotenv==1.0.0
 langgraph==0.0.50
-google-genai==0.3.0 
-
-# Twilio and Media Streams
+httpx==0.25.0
+requests==2.31.0
+aiofiles==23.2.1
 twilio==9.0.0
-
-# Speech-to-Text
-google-cloud-speech==2.21.0
-
-# Text-to-Speech
-google-cloud-texttospeech==2.14.0
-elevenlabs==0.2.8
-
-# Utilities
-aiofiles
-httpx
