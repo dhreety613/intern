@@ -11,7 +11,7 @@ python-dotenv==1.0.1
 
 twilio==9.4.0
 
-google-generativeai==0.3.2
+google-genai
 
 google-cloud-speech==2.21.0
 
