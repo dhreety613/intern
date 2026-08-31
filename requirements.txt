@@ -5,7 +5,6 @@ beautifulsoup4
 pydantic
 jinja2>=3.1.0
 python-multipart
-google-genai
 langgraph
 fastapi==0.104.1
 uvicorn==0.24.0
@@ -16,4 +15,3 @@ python-dotenv==1.0.0
 twilio==9.0.0
 httpx==0.25.0
 aiofiles==23.2.1
-maturin
