@@ -167,7 +167,7 @@ class TwilioMediaStream:
         transcript = None
         try:
             async for text in self.stt.transcribe_stream(
-                self._audio_generator(audio_bytes)
+                self._async_audio_generator(audio_bytes)
             ):
                 transcript = text
                 logger.info(f"Customer: {transcript}")
@@ -320,6 +320,6 @@ class TwilioMediaStream:
         await self.websocket.send_text(json.dumps(message))
         logger.info("Sent stop event to Twilio")
 
-    async def _audio_generator(self, audio_bytes: bytes):
-        """Generator that yields audio bytes."""
+    async def _async_audio_generator(self, audio_bytes: bytes):
+        """Async generator that yields audio bytes."""
         yield audio_bytes
