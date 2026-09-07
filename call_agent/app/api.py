@@ -102,14 +102,32 @@ def health_stt():
 
 
 @router.get("/health/tts")
-def health_tts():
-    """Test ElevenLabs TTS initialization"""
+async def health_tts(text: str = "Hello, this is a test."):
+    """Actually synthesize a phrase and report what the TTS path produced."""
+    import traceback
     try:
         from call_agent.app.speech_services import get_tts_engine
         tts = get_tts_engine("elevenlabs")
-        return {"status": "OK", "component": "ElevenLabsTTS"}
+        total = 0
+        chunks = 0
+        async for chunk in tts.text_to_speech_stream(text):
+            total += len(chunk)
+            chunks += 1
+        return {
+            "status": "OK" if total > 0 else "NO_AUDIO",
+            "component": "ElevenLabsTTS",
+            "voice_id": getattr(tts, "voice_id", None),
+            "model_id": getattr(tts, "model_id", None),
+            "bytes": total,
+            "chunks": chunks,
+        }
     except Exception as e:
-        return {"status": "FAILED", "component": "ElevenLabsTTS", "error": str(e)}
+        return {
+            "status": "FAILED",
+            "component": "ElevenLabsTTS",
+            "error": f"{type(e).__name__}: {e}",
+            "trace": traceback.format_exc()[-1500:],
+        }
 
 
 @router.get("/health/agent")
@@ -180,6 +198,7 @@ def call_agent_health():
     return {
         "service": "call-agent",
         "status": "healthy",
+        "build": "voice-fix-4",
     }
 
 
