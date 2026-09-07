@@ -88,8 +88,7 @@ class ChatCompletionRequest(BaseModel):
 
 # Add to call_agent/app/api.py
 
-
-@router.get("/twiml")
+@router.post("/twiml")
 def twilio_twiml(
     customer_name: str = "Customer",
     email: str = "",
