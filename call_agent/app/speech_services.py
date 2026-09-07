@@ -104,6 +104,7 @@ class ElevenLabsTTS:
 
         self.voice_id = os.getenv("ELEVENLABS_VOICE_ID", voice_id)
         self.model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2")
+        self.output_format = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "ulaw_8000")
 
     async def text_to_speech_stream(
         self,
@@ -126,10 +127,9 @@ class ElevenLabsTTS:
             return
 
         url = f"{self.API_BASE}/text-to-speech/{self.voice_id}/stream"
-        params = {"output_format": "ulaw_8000"}
+        params = {"output_format": self.output_format}
         headers = {
             "xi-api-key": self.api_key,
-            "accept": "audio/basic",
             "content-type": "application/json",
         }
         payload = {"text": text, "model_id": self.model_id}
@@ -140,12 +140,15 @@ class ElevenLabsTTS:
                     "POST", url, params=params, headers=headers, json=payload
                 ) as resp:
                     if resp.status_code != 200:
-                        body = await resp.aread()
+                        body = (await resp.aread()).decode("utf-8", "replace")
                         logger.error(
-                            f"ElevenLabs TTS HTTP {resp.status_code}: "
-                            f"{body[:500].decode('utf-8', 'replace')}"
+                            f"ElevenLabs TTS HTTP {resp.status_code} "
+                            f"(voice={self.voice_id} model={self.model_id} "
+                            f"format={self.output_format}): {body[:800]}"
                         )
-                        resp.raise_for_status()
+                        raise RuntimeError(
+                            f"ElevenLabs {resp.status_code}: {body[:800]}"
+                        )
 
                     async for chunk in resp.aiter_bytes():
                         if chunk:

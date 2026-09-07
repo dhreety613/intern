@@ -118,6 +118,7 @@ async def health_tts(text: str = "Hello, this is a test."):
             "component": "ElevenLabsTTS",
             "voice_id": getattr(tts, "voice_id", None),
             "model_id": getattr(tts, "model_id", None),
+            "output_format": getattr(tts, "output_format", None),
             "bytes": total,
             "chunks": chunks,
         }
@@ -198,7 +199,7 @@ def call_agent_health():
     return {
         "service": "call-agent",
         "status": "healthy",
-        "build": "voice-fix-4",
+        "build": "voice-fix-5",
     }
 
 
