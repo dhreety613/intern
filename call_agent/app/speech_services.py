@@ -25,8 +25,9 @@ class GoogleSTT:
         # pointing to your service account JSON key
         self.client = speech_v1.SpeechClient()
         self.config = speech_v1.RecognitionConfig(
-            encoding=speech_v1.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=8000,  # Twilio sends 8kHz
+            # Twilio Media Streams sends 8kHz mono G.711 mu-law, not LINEAR16.
+            encoding=speech_v1.RecognitionConfig.AudioEncoding.MULAW,
+            sample_rate_hertz=8000,
             language_code="en-US",
             enable_automatic_punctuation=True,
         )
@@ -146,11 +147,14 @@ class ElevenLabsTTS:
         try:
             # Use ElevenLabs streaming API for low latency
             # This returns an iterator of audio chunks
+            # Twilio Media Streams expects 8kHz mono mu-law base64 frames,
+            # so ask ElevenLabs for that format directly. `stream=` is not a
+            # valid kwarg on convert_as_stream in elevenlabs>=1.x.
             audio_stream = self.client.text_to_speech.convert_as_stream(
                 voice_id=self.voice_id,
                 text=text,
-                model_id="eleven_monolingual_v1",
-                stream=True,
+                model_id="eleven_turbo_v2",
+                output_format="ulaw_8000",
             )
 
             # Yield each chunk as it arrives

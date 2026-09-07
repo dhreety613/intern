@@ -1,5 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
+from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Response
 from fastapi.responses import StreamingResponse
@@ -126,24 +128,47 @@ def health_agent():
     except Exception as e:
         return {"status": "FAILED", "component": "CallSession", "error": str(e)}
 @router.post("/twiml")
-def twilio_twiml(
-    customer_name: str = "Customer",
-    email: str = "",
-    phone_number: str = "",
-    calibration_dates: str = ""
-):
-    """Convert Twilio call to Media Streams WebSocket"""
-    
-    media_url = f"wss://fetch-history-e22w.onrender.com/media?customer_name={customer_name}&email={email}&phone_number={phone_number}&calibration_dates={calibration_dates}"
-    
+async def twilio_twiml(request: Request):
+    """Convert Twilio call to a Media Streams WebSocket.
+
+    Twilio validates the response as strict XML, so every `&` in the
+    stream URL must be XML-escaped (`&amp;`) and each query value must be
+    URL-encoded. The host and route prefix are taken from the inbound
+    request so this follows whatever URL Render serves.
+    """
+
+    params = request.query_params
+
+    customer_name = params.get("customer_name", "Customer")
+    email = params.get("email", "")
+    phone_number = params.get("phone_number", "")
+    calibration_dates = params.get("calibration_dates", "")
+
+    host = request.headers.get("host", request.url.netloc)
+
+    # Mirror whatever prefix this router is mounted under (e.g. /call-agent).
+    prefix = request.url.path[: -len("/twiml")] if request.url.path.endswith("/twiml") else ""
+
+    query = "&".join(
+        f"{key}={quote(value, safe='')}"
+        for key, value in (
+            ("customer_name", customer_name),
+            ("email", email),
+            ("phone_number", phone_number),
+            ("calibration_dates", calibration_dates),
+        )
+    )
+
+    media_url = escape(f"wss://{host}{prefix}/media?{query}")
+
     twiml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
         <Stream url="{media_url}" />
     </Connect>
 </Response>'''
-    
-    return Response(content=twiml, media_type="application/xml")
+
+    return Response(content=twiml, media_type="text/xml")
 
 # ============================================================
 # HEALTH
@@ -827,6 +852,7 @@ async def twilio_media_stream(
     customer_name: str = "Customer",
     email: str = "",
     phone_number: str = "",
+    calibration_dates: str = "",
     deal_id: str = "",
 ):
     """
@@ -851,7 +877,7 @@ async def twilio_media_stream(
             customer_name=customer_name or "Customer",
             email=email or "",
             phone_number=phone_number or "",
-            calibration_dates=[],
+            calibration_dates=calibration_dates or "",
         )
 
         await handler.handle()
