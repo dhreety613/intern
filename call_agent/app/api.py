@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -86,6 +86,28 @@ class ChatCompletionRequest(BaseModel):
         default_factory=dict
     )
 
+# Add to call_agent/app/api.py
+
+
+@router.get("/twiml")
+def twilio_twiml(
+    customer_name: str = "Customer",
+    email: str = "",
+    phone_number: str = "",
+    calibration_dates: str = ""
+):
+    """Convert Twilio call to Media Streams WebSocket"""
+    
+    media_url = f"wss://fetch-history-e22w.onrender.com/media?customer_name={customer_name}&email={email}&phone_number={phone_number}&calibration_dates={calibration_dates}"
+    
+    twiml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Connect>
+        <Stream url="{media_url}" />
+    </Connect>
+</Response>'''
+    
+    return Response(content=twiml, media_type="application/xml")
 
 # ============================================================
 # HEALTH
