@@ -3,6 +3,7 @@ import base64
 import logging
 from typing import Dict, Any
 from fastapi import WebSocket
+from starlette.websockets import WebSocketDisconnect
 import asyncio
 from datetime import datetime, timedelta
 
@@ -77,6 +78,12 @@ class TwilioMediaStream:
         self.wait_timeout_seconds = 90
         self.wait_timeout_task = None
 
+        # Serialize audio writes so the greeting and replies don't interleave
+        # frames on the socket.
+        self._tts_lock = asyncio.Lock()
+        self._greeting_task = None
+        self._processing = False
+
     async def handle(self):
         """
         Main WebSocket message loop.
@@ -101,11 +108,16 @@ class TwilioMediaStream:
                     self._handle_stop(data)
                     break
 
+        except WebSocketDisconnect:
+            logger.info("Twilio closed the media stream")
         except Exception as e:
             logger.error(f"Media stream error: {e}", exc_info=True)
         finally:
             self._cancel_wait_timeout()
-            await self.websocket.close()
+            try:
+                await self.websocket.close()
+            except Exception:
+                pass
 
     def _handle_connected(self, data: Dict[str, Any]):
         """Handle Twilio connection event."""
@@ -113,12 +125,14 @@ class TwilioMediaStream:
 
     def _handle_start(self, data: Dict[str, Any]):
         """Handle Twilio start event (stream parameters)."""
-        self.stream_sid = data.get("streamSid")
-        self.call_sid = data.get("callSid")
-        logger.info(f"Stream started: {self.stream_sid}")
+        start = data.get("start", {}) or {}
+        self.stream_sid = data.get("streamSid") or start.get("streamSid")
+        self.call_sid = data.get("callSid") or start.get("callSid")
+        logger.info(f"Stream started: sid={self.stream_sid} call={self.call_sid}")
 
-        # Send Anne's opening greeting
-        asyncio.create_task(self._send_opening_greeting())
+        # Send Anne's opening greeting. Keep a reference so the task isn't
+        # garbage-collected and its exceptions surface.
+        self._greeting_task = asyncio.create_task(self._send_opening_greeting())
 
     def _handle_stop(self, data: Dict[str, Any]):
         """Handle Twilio stop event."""
@@ -136,6 +150,13 @@ class TwilioMediaStream:
         if not audio_chunk:
             return
 
+        # Half-duplex: ignore inbound audio while Anne is speaking (or while a
+        # turn is still being processed) so her own voice / line echo doesn't
+        # get transcribed and answered.
+        if self._tts_lock.locked() or self._processing:
+            self.audio_buffer.clear()
+            return
+
         # Customer provided input - cancel any pending wait timeout
         self._cancel_wait_timeout()
 
@@ -147,9 +168,18 @@ class TwilioMediaStream:
             logger.error(f"Failed to decode audio: {e}")
             return
 
-        # Check for silence or buffer size
+        # Once enough audio is buffered, process the turn in the background so
+        # the receive loop keeps draining the socket.
         if len(self.audio_buffer) >= self.min_audio_buffer_size:
+            self._processing = True
+            asyncio.create_task(self._process_turn())
+
+    async def _process_turn(self):
+        """Run one STT -> agent -> TTS turn, then re-open the mic."""
+        try:
             await self._process_audio_buffer()
+        finally:
+            self._processing = False
 
     async def _process_audio_buffer(self):
         """
@@ -182,9 +212,11 @@ class TwilioMediaStream:
         if not transcript or not transcript.strip():
             return
 
-        # Process through agent
+        # Process through agent. call_graph.invoke() is synchronous and can
+        # block for seconds on LLM calls, so run it off the event loop to
+        # keep reading/writing the Twilio socket.
         try:
-            result = self.session.process(transcript)
+            result = await asyncio.to_thread(self.session.process, transcript)
             response_text = result.get("response", "")
             call_ended = result.get("call_ended", False)
             decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
@@ -251,7 +283,7 @@ class TwilioMediaStream:
             logger.info(f"Auto-processing timeout: {timeout_message}")
 
             try:
-                result = self.session.process(timeout_message)
+                result = await asyncio.to_thread(self.session.process, timeout_message)
                 response_text = result.get("response", "")
                 call_ended = result.get("call_ended", False)
 
@@ -281,47 +313,73 @@ class TwilioMediaStream:
         logger.info(f"Anne (greeting): {greeting}")
         await self._stream_tts_to_twilio(greeting)
 
+    # 8kHz mu-law => 160 bytes == 20ms. Twilio plays inbound media as
+    # 20ms frames, so slice the TTS stream to that size and pace delivery.
+    TWILIO_FRAME_BYTES = 160
+    TWILIO_FRAME_SECONDS = 0.02
+
+    async def _send_media_frame(self, frame: bytes):
+        await self.websocket.send_text(json.dumps({
+            "event": "media",
+            "streamSid": self.stream_sid,
+            "media": {"payload": base64.b64encode(frame).decode("utf-8")},
+        }))
+
     async def _stream_tts_to_twilio(self, text: str):
         """
-        Synthesize text to speech and stream chunks to Twilio.
+        Synthesize text to speech and stream 20ms mu-law frames to Twilio.
         """
-        try:
-            # Start streaming TTS
-            chunk_index = 0
+        if not self.stream_sid:
+            logger.warning("No stream_sid yet - dropping TTS output")
+            return
 
-            async for audio_chunk in self.tts.text_to_speech_stream(text):
-                # Package as Twilio media message
-                payload = base64.b64encode(audio_chunk).decode("utf-8")
+        async with self._tts_lock:
+            try:
+                leftover = b""
+                frames_sent = 0
 
-                message = {
-                    "event": "media",
+                async for audio_chunk in self.tts.text_to_speech_stream(text):
+                    buf = leftover + audio_chunk
+                    offset = 0
+
+                    while len(buf) - offset >= self.TWILIO_FRAME_BYTES:
+                        frame = buf[offset:offset + self.TWILIO_FRAME_BYTES]
+                        offset += self.TWILIO_FRAME_BYTES
+                        await self._send_media_frame(frame)
+                        frames_sent += 1
+                        await asyncio.sleep(self.TWILIO_FRAME_SECONDS)
+
+                    leftover = buf[offset:]
+
+                if leftover:
+                    frame = leftover + b"\xff" * (self.TWILIO_FRAME_BYTES - len(leftover))
+                    await self._send_media_frame(frame)
+                    frames_sent += 1
+
+                # Mark end of this utterance (lets Twilio report playback).
+                await self.websocket.send_text(json.dumps({
+                    "event": "mark",
                     "streamSid": self.stream_sid,
-                    "media": {
-                        "payload": payload,
-                    },
-                }
+                    "mark": {"name": f"tts-{frames_sent}"},
+                }))
 
-                await self.websocket.send_text(json.dumps(message))
-                chunk_index += 1
+                logger.info(f"Streamed {frames_sent} audio frames to Twilio")
 
-                # Small delay between chunks
-                await asyncio.sleep(0.02)
-
-            logger.info(f"Streamed {chunk_index} audio chunks to Twilio")
-
-        except Exception as e:
-            logger.error(f"TTS streaming error: {e}")
+            except Exception as e:
+                logger.error(f"TTS streaming error: {e}", exc_info=True)
 
     async def _send_stop(self):
-        """Tell Twilio to hang up."""
-        self._cancel_wait_timeout()
+        """End the call by closing the Media Stream socket.
 
-        message = {
-            "event": "stop",
-            "streamSid": self.stream_sid,
-        }
-        await self.websocket.send_text(json.dumps(message))
-        logger.info("Sent stop event to Twilio")
+        Twilio Media Streams has no server-sent "stop" event; closing the
+        WebSocket ends the <Connect><Stream> and the call hangs up.
+        """
+        self._cancel_wait_timeout()
+        logger.info("Ending call - closing media stream")
+        try:
+            await self.websocket.close()
+        except Exception as e:
+            logger.error(f"Error closing websocket: {e}")
 
     async def _async_audio_generator(self, audio_bytes: bytes):
         """Async generator that yields audio bytes."""
