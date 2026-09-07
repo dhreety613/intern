@@ -39,35 +39,40 @@ class TwilioMediaStream:
         customer_name: str = "",
         email: str = "",
         phone_number: str = "",
-        calibration_dates: list = None,
+        calibration_dates: str = "",
     ):
         self.websocket = websocket
         self.stream_sid = None
         self.call_sid = None
+
+        # Parse calibration_dates from comma-separated string
+        dates_list = []
+        if calibration_dates:
+            dates_list = [d.strip() for d in calibration_dates.split(",") if d.strip()]
 
         # Create or reuse CallSession
         self.session = CallSession(
             customer_name=customer_name or "Customer",
             email=email or "",
             phone_number=phone_number or "",
-            calibration_dates=calibration_dates or [],
+            calibration_dates=dates_list,
         )
 
         # Speech services
         self.stt = GoogleSTT()
-        self.tts = get_tts_engine("elevenlabs")  # Use ElevenLabs for best quality
+        self.tts = get_tts_engine("elevenlabs")
 
         # Buffers
         self.audio_buffer = bytearray()
-        self.min_audio_buffer_size = 320  # ~40ms at 8kHz
+        self.min_audio_buffer_size = 320
         self.silence_duration = 0
-        self.silence_threshold = 10  # frames of silence before sending to STT
+        self.silence_threshold = 10
 
         # TIMEOUT TRACKING
-        self.last_agent_task = None  # Track last decision task (WAIT, CONTINUE, etc)
-        self.wait_started_at = None  # When WAIT state began
-        self.wait_timeout_seconds = 90  # 90-second timeout for WAIT
-        self.wait_timeout_task = None  # Async task for timeout
+        self.last_agent_task = None
+        self.wait_started_at = None
+        self.wait_timeout_seconds = 90
+        self.wait_timeout_task = None
 
     async def handle(self):
         """
@@ -140,7 +145,6 @@ class TwilioMediaStream:
             return
 
         # Check for silence or buffer size
-        # If buffer is large enough, process it
         if len(self.audio_buffer) >= self.min_audio_buffer_size * 8:
             await self._process_audio_buffer()
 
@@ -198,9 +202,7 @@ class TwilioMediaStream:
         if response_text:
             await self._stream_tts_to_twilio(response_text)
 
-        # ====================================================================
         # TIMEOUT HANDLING: If WAIT, start 90-second timer
-        # ====================================================================
         if decision_task == "WAIT":
             self._start_wait_timeout()
 
