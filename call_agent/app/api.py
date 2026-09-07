@@ -91,14 +91,29 @@ class ChatCompletionRequest(BaseModel):
 # Add to call_agent/app/api.py
 
 @router.get("/health/stt")
-def health_stt():
-    """Test Google Cloud STT initialization"""
+async def health_stt():
+    """Actually call Google recognize() so credentials/encoding are verified."""
+    import traceback, asyncio
     try:
         from call_agent.app.speech_services import GoogleSTT
         stt = GoogleSTT()
-        return {"status": "OK", "component": "GoogleSTT"}
+        # 0.5s of mu-law silence - won't transcribe, but exercises auth + config.
+        silence = b"\xff" * 4000
+
+        async def _gen():
+            yield silence
+
+        got = []
+        async for text in stt.transcribe_stream(_gen()):
+            got.append(text)
+        return {"status": "OK", "component": "GoogleSTT", "transcripts": got}
     except Exception as e:
-        return {"status": "FAILED", "component": "GoogleSTT", "error": str(e)}
+        return {
+            "status": "FAILED",
+            "component": "GoogleSTT",
+            "error": f"{type(e).__name__}: {e}",
+            "trace": traceback.format_exc()[-1500:],
+        }
 
 
 @router.get("/health/tts")
@@ -199,7 +214,7 @@ def call_agent_health():
     return {
         "service": "call-agent",
         "status": "healthy",
-        "build": "voice-fix-5",
+        "build": "voice-fix-6",
     }
 
 
