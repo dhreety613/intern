@@ -2,10 +2,10 @@ import os
 import json
 from typing import AsyncIterator
 from google.cloud import speech_v1
-from google.cloud import speech_v1p1beta1
-from elevenlabs.client import ElevenLabs
 import asyncio
 import logging
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -37,74 +37,46 @@ class GoogleSTT:
         audio_chunks: AsyncIterator[bytes],
     ) -> AsyncIterator[str]:
         """
-        Stream audio chunks, yield transcribed text as it arrives.
-        
+        Collect the buffered audio and transcribe it in one batch call.
+
+        The media handler already accumulates a chunk of caller audio and
+        hands it over as a single blob, so a batch ``recognize`` is both
+        simpler and far more reliable than juggling the sync streaming
+        gRPC client from inside asyncio. The blocking call is pushed to a
+        worker thread so the event loop keeps servicing the WebSocket.
+
         Args:
-            audio_chunks: async iterator of raw audio bytes (LINEAR16, 8kHz)
-            
+            audio_chunks: async iterator of raw audio bytes (mu-law, 8kHz)
+
         Yields:
-            Transcribed text (partial then final)
+            Final transcript text (one item, if anything was recognised)
         """
 
-        def requests():
-            """Generator that yields RecognizeRequest objects."""
-            yield speech_v1.StreamingRecognizeRequest(
-                streaming_config=speech_v1.StreamingRecognitionConfig(
-                    config=self.config,
-                    interim_results=True,  # Get partial results
-                )
-            )
+        buffer = bytearray()
+        async for chunk in audio_chunks:
+            if chunk:
+                buffer.extend(chunk)
 
-            # Yield audio chunks as requests
-            async def audio_gen():
-                async for chunk in audio_chunks:
-                    yield chunk
+        if not buffer:
+            return
 
-            # This is awkward: we need sync generator but have async chunks.
-            # Use a blocking queue as bridge.
-            import queue
-            q = queue.Queue()
-            error_holder = [None]
+        audio = speech_v1.RecognitionAudio(content=bytes(buffer))
 
-            async def feed_queue():
-                try:
-                    async for chunk in audio_chunks:
-                        q.put(("chunk", chunk))
-                    q.put(("done", None))
-                except Exception as e:
-                    error_holder[0] = e
-                    q.put(("error", e))
+        def _recognize():
+            return self.client.recognize(config=self.config, audio=audio)
 
-            # Start feeding task (run in background)
-            task = asyncio.create_task(feed_queue())
+        try:
+            response = await asyncio.to_thread(_recognize)
+        except Exception as e:
+            logger.error(f"Google STT recognize failed: {e}")
+            raise
 
-            while True:
-                item_type, item = q.get()
-                if item_type == "chunk":
-                    yield speech_v1.StreamingRecognizeRequest(
-                        audio_content=item
-                    )
-                elif item_type == "done":
-                    break
-                elif item_type == "error":
-                    raise item
-
-        # Call the streaming recognize API
-        responses = self.client.streaming_recognize(requests())
-
-        for response in responses:
-            if not response.results:
+        for result in response.results:
+            if not result.alternatives:
                 continue
-
-            # Get the first result (most confident)
-            result = response.results[0]
-
-            if result.alternatives:
-                transcript = result.alternatives[0].transcript
-
-                # Only yield final results to avoid noise
-                if result.is_final:
-                    yield transcript
+            transcript = result.alternatives[0].transcript
+            if transcript and transcript.strip():
+                yield transcript
 
 
 # ============================================================
@@ -117,6 +89,12 @@ class ElevenLabsTTS:
     Streams audio bytes for low-latency response.
     """
 
+    # ElevenLabs HTTP streaming endpoint. Used directly instead of the SDK
+    # because the SDK's client surface changes between releases (the
+    # deployed build exposes `text_to_speech` as a realtime client with no
+    # `convert_as_stream`), whereas the REST contract is stable.
+    API_BASE = "https://api.elevenlabs.io/v1"
+
     def __init__(self, voice_id: str = "21m00Tcm4TlvDq8ikWAM"):
         # Default voice: "Rachel" (21m00Tcm4TlvDq8ikWAM)
         # Other voices: see ElevenLabs dashboard
@@ -124,45 +102,54 @@ class ElevenLabsTTS:
         if not self.api_key:
             raise ValueError("ELEVENLABS_API_KEY not set")
 
-        self.client = ElevenLabs(api_key=self.api_key)
-        self.voice_id = voice_id
+        self.voice_id = os.getenv("ELEVENLABS_VOICE_ID", voice_id)
+        self.model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2")
 
     async def text_to_speech_stream(
         self,
         text: str,
     ) -> AsyncIterator[bytes]:
         """
-        Convert text to speech and stream audio bytes.
-        
+        Convert text to speech and stream raw audio bytes.
+
+        Requests ``ulaw_8000`` so the bytes can go straight into Twilio
+        Media Streams (8kHz mono mu-law) after base64 encoding.
+
         Args:
             text: The text to synthesize
-            
+
         Yields:
-            Audio chunks (mp3 or pcm, depending on ElevenLabs config)
+            Audio chunks (8kHz mono mu-law)
         """
 
         if not text.strip():
             return
 
-        try:
-            # Use ElevenLabs streaming API for low latency
-            # This returns an iterator of audio chunks
-            # Twilio Media Streams expects 8kHz mono mu-law base64 frames,
-            # so ask ElevenLabs for that format directly. `stream=` is not a
-            # valid kwarg on convert_as_stream in elevenlabs>=1.x.
-            audio_stream = self.client.text_to_speech.convert_as_stream(
-                voice_id=self.voice_id,
-                text=text,
-                model_id="eleven_turbo_v2",
-                output_format="ulaw_8000",
-            )
+        url = f"{self.API_BASE}/text-to-speech/{self.voice_id}/stream"
+        params = {"output_format": "ulaw_8000"}
+        headers = {
+            "xi-api-key": self.api_key,
+            "accept": "audio/basic",
+            "content-type": "application/json",
+        }
+        payload = {"text": text, "model_id": self.model_id}
 
-            # Yield each chunk as it arrives
-            for chunk in audio_stream:
-                if chunk:
-                    yield chunk
-                    # Small delay to avoid overwhelming the network
-                    await asyncio.sleep(0.01)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream(
+                    "POST", url, params=params, headers=headers, json=payload
+                ) as resp:
+                    if resp.status_code != 200:
+                        body = await resp.aread()
+                        logger.error(
+                            f"ElevenLabs TTS HTTP {resp.status_code}: "
+                            f"{body[:500].decode('utf-8', 'replace')}"
+                        )
+                        resp.raise_for_status()
+
+                    async for chunk in resp.aiter_bytes():
+                        if chunk:
+                            yield chunk
 
         except Exception as e:
             logger.error(f"ElevenLabs TTS error: {e}")

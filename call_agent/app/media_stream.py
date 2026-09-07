@@ -63,8 +63,11 @@ class TwilioMediaStream:
         self.tts = get_tts_engine("elevenlabs")
 
         # Buffers
+        # Twilio streams 8kHz mono mu-law => 8000 bytes/sec. Collect roughly
+        # 1.5s of caller audio before sending a batch to STT so utterances
+        # aren't chopped mid-word.
         self.audio_buffer = bytearray()
-        self.min_audio_buffer_size = 320
+        self.min_audio_buffer_size = 12000
         self.silence_duration = 0
         self.silence_threshold = 10
 
@@ -145,7 +148,7 @@ class TwilioMediaStream:
             return
 
         # Check for silence or buffer size
-        if len(self.audio_buffer) >= self.min_audio_buffer_size * 8:
+        if len(self.audio_buffer) >= self.min_audio_buffer_size:
             await self._process_audio_buffer()
 
     async def _process_audio_buffer(self):
