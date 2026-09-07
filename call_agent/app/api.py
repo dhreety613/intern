@@ -88,6 +88,43 @@ class ChatCompletionRequest(BaseModel):
 
 # Add to call_agent/app/api.py
 
+@router.get("/health/stt")
+def health_stt():
+    """Test Google Cloud STT initialization"""
+    try:
+        from call_agent.app.speech_services import GoogleSTT
+        stt = GoogleSTT()
+        return {"status": "OK", "component": "GoogleSTT"}
+    except Exception as e:
+        return {"status": "FAILED", "component": "GoogleSTT", "error": str(e)}
+
+
+@router.get("/health/tts")
+def health_tts():
+    """Test ElevenLabs TTS initialization"""
+    try:
+        from call_agent.app.speech_services import get_tts_engine
+        tts = get_tts_engine("elevenlabs")
+        return {"status": "OK", "component": "ElevenLabsTTS"}
+    except Exception as e:
+        return {"status": "FAILED", "component": "ElevenLabsTTS", "error": str(e)}
+
+
+@router.get("/health/agent")
+def health_agent():
+    """Test CallSession/Agent initialization"""
+    try:
+        from call_agent.app.call import CallSession
+        session = CallSession(
+            customer_name="Test",
+            email="test@test.com",
+            phone_number="+1234567890",
+            calibration_dates=["September 15, 2026"]
+        )
+        greeting = session.start()
+        return {"status": "OK", "component": "CallSession", "greeting": greeting}
+    except Exception as e:
+        return {"status": "FAILED", "component": "CallSession", "error": str(e)}
 @router.post("/twiml")
 def twilio_twiml(
     customer_name: str = "Customer",
