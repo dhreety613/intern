@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import struct
 from typing import AsyncIterator
 from google.cloud import speech_v1
@@ -150,7 +151,11 @@ class ElevenLabsSTT:
         url = f"{self.API_BASE}/speech-to-text"
         headers = {"xi-api-key": self.api_key}
         files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
-        data = {"model_id": self.model_id}
+        # tag_audio_events=false: without this, Scribe labels non-speech
+        # audio (line noise, silence, clicks) with tags like "[pause]" or
+        # "[phone ringing]" - which we'd otherwise treat as real speech and
+        # feed straight into the agent.
+        data = {"model_id": self.model_id, "tag_audio_events": "false"}
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -168,8 +173,13 @@ class ElevenLabsSTT:
             raise
 
         text = (result.get("text") or "").strip()
-        if text:
-            yield text
+        # Defensive: strip any bracketed audio-event tags Scribe still
+        # emits (e.g. "[click]", "[background noise]") even with
+        # tag_audio_events off, so they never reach the agent as if they
+        # were something the caller said.
+        cleaned = re.sub(r"\[[^\]]*\]", "", text).strip()
+        if cleaned:
+            yield cleaned
 
 
 # ============================================================

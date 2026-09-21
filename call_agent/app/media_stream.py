@@ -86,6 +86,15 @@ class TwilioMediaStream:
         self._greeting_task = None
         self._processing = False
 
+        # session.process() runs off-thread and can't actually be cancelled
+        # once started. If a turn times out (see AGENT_TIMEOUT_SECONDS), the
+        # thread keeps running in the background and will still mutate
+        # self.session.state when it eventually finishes. This lock makes
+        # sure the NEXT turn's session.process() call always waits for that
+        # orphaned call to truly finish first, so two turns never mutate
+        # session state concurrently or land out of order.
+        self._agent_lock = asyncio.Lock()
+
     # Hard caps so a slow/hung STT or LLM call can't permanently lock the
     # half-duplex gate (self._processing) and go silent for the rest of the
     # call.
@@ -275,10 +284,7 @@ class TwilioMediaStream:
         # Twilio socket) and cap how long we'll wait for the same reason as
         # the STT call above.
         try:
-            result = await asyncio.wait_for(
-                asyncio.to_thread(self.session.process, transcript),
-                timeout=self.AGENT_TIMEOUT_SECONDS,
-            )
+            result = await self._call_agent(transcript)
             response_text = result.get("response", "")
             call_ended = result.get("call_ended", False)
             decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
@@ -312,6 +318,25 @@ class TwilioMediaStream:
         # End call if agent decides so
         if call_ended:
             await self._send_stop()
+
+    async def _call_agent(self, text: str) -> Dict[str, Any]:
+        """Run session.process() off-thread, bounded by AGENT_TIMEOUT_SECONDS.
+
+        asyncio.to_thread() can't actually be cancelled once the thread
+        starts, so a timed-out call keeps running in the background. Using
+        asyncio.shield() here (instead of awaiting the thread directly)
+        lets `asyncio.wait_for` give up waiting and raise TimeoutError to
+        the caller without killing the underlying task - it keeps running,
+        holding self._agent_lock until it truly finishes. That guarantees
+        the *next* call to this method blocks until the orphaned one is
+        done, so session.state is never mutated by two overlapping turns.
+        """
+        async def _run():
+            async with self._agent_lock:
+                return await asyncio.to_thread(self.session.process, text)
+
+        task = asyncio.create_task(_run())
+        return await asyncio.wait_for(asyncio.shield(task), timeout=self.AGENT_TIMEOUT_SECONDS)
 
     def _start_wait_timeout(self):
         """Start a 90-second timeout for WAIT state."""
@@ -351,10 +376,7 @@ class TwilioMediaStream:
             logger.info(f"Auto-processing timeout: {timeout_message}")
 
             try:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(self.session.process, timeout_message),
-                    timeout=self.AGENT_TIMEOUT_SECONDS,
-                )
+                result = await self._call_agent(timeout_message)
                 response_text = result.get("response", "")
                 call_ended = result.get("call_ended", False)
 
