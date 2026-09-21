@@ -86,6 +86,12 @@ class TwilioMediaStream:
         self._greeting_task = None
         self._processing = False
 
+    # Hard caps so a slow/hung STT or LLM call can't permanently lock the
+    # half-duplex gate (self._processing) and go silent for the rest of the
+    # call.
+    STT_TIMEOUT_SECONDS = 20.0
+    AGENT_TIMEOUT_SECONDS = 25.0
+
     async def handle(self):
         """
         Main WebSocket message loop.
@@ -223,14 +229,29 @@ class TwilioMediaStream:
         audio_bytes = bytes(self.audio_buffer)
         self.audio_buffer.clear()
 
-        # Transcribe
-        transcript = None
-        try:
+        # Transcribe. A hard timeout here matters more than usual: if this
+        # hangs instead of raising, `self._processing` never resets and the
+        # half-duplex gate in _handle_media silently drops every future
+        # audio chunk for the rest of the call - total, permanent silence.
+        async def _run_stt():
+            last = None
             async for text in self.stt.transcribe_stream(
                 self._async_audio_generator(audio_bytes)
             ):
-                transcript = text
-                logger.info(f"Customer: {transcript}")
+                last = text
+                logger.info(f"Customer: {last}")
+            return last
+
+        transcript = None
+        try:
+            transcript = await asyncio.wait_for(_run_stt(), timeout=self.STT_TIMEOUT_SECONDS)
+
+        except asyncio.TimeoutError:
+            logger.error(f"STT timed out after {self.STT_TIMEOUT_SECONDS}s")
+            await self._stream_tts_to_twilio(
+                "Sorry, I couldn't hear that clearly. Could you say that again?"
+            )
+            return
 
         except Exception as e:
             logger.error(f"STT error: {e}")
@@ -248,14 +269,25 @@ class TwilioMediaStream:
             )
             return
 
-        # Process through agent. call_graph.invoke() is synchronous and can
-        # block for seconds on LLM calls, so run it off the event loop to
-        # keep reading/writing the Twilio socket.
+        # Process through agent. call_graph.invoke() is synchronous, can
+        # block for seconds on LLM calls, and has no bounded timeout of its
+        # own, so run it off the event loop (to keep reading/writing the
+        # Twilio socket) and cap how long we'll wait for the same reason as
+        # the STT call above.
         try:
-            result = await asyncio.to_thread(self.session.process, transcript)
+            result = await asyncio.wait_for(
+                asyncio.to_thread(self.session.process, transcript),
+                timeout=self.AGENT_TIMEOUT_SECONDS,
+            )
             response_text = result.get("response", "")
             call_ended = result.get("call_ended", False)
             decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
+
+        except asyncio.TimeoutError:
+            logger.error(f"Agent timed out after {self.AGENT_TIMEOUT_SECONDS}s")
+            response_text = "Sorry, that's taking longer than expected. Could you please repeat that?"
+            call_ended = False
+            decision_task = "CONTINUE"
 
         except Exception as e:
             logger.error(f"Agent error: {e}", exc_info=True)
@@ -319,7 +351,10 @@ class TwilioMediaStream:
             logger.info(f"Auto-processing timeout: {timeout_message}")
 
             try:
-                result = await asyncio.to_thread(self.session.process, timeout_message)
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(self.session.process, timeout_message),
+                    timeout=self.AGENT_TIMEOUT_SECONDS,
+                )
                 response_text = result.get("response", "")
                 call_ended = result.get("call_ended", False)
 

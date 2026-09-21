@@ -1,9 +1,20 @@
+import logging
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from typing import List, Dict, Any
 from fastapi.responses import FileResponse
 import os
+
+# This is the actual deployed entrypoint (uvicorn main:app). Without this,
+# nothing logged by call_agent's submodules (logger.info/error calls in the
+# voice pipeline) ever reaches Render's log output - Python's root logger
+# has no handler configured otherwise.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
 
 
 
