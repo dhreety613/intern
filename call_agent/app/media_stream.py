@@ -48,18 +48,18 @@ class TwilioMediaStream:
         self.stream_sid = None
         self.call_sid = None
 
-        # Parse calibration_dates from comma-separated string
-        dates_list = []
-        if calibration_dates:
-            dates_list = [d.strip() for d in calibration_dates.split(",") if d.strip()]
+        # Fallback customer data, parsed from the /media WebSocket URL's
+        # query string. Some proxies don't reliably preserve query strings
+        # on a WSS upgrade request, so this is only used if Twilio's
+        # <Parameter> values (delivered in the "start" event) are missing.
+        self._fallback_customer_name = customer_name
+        self._fallback_email = email
+        self._fallback_phone_number = phone_number
+        self._fallback_calibration_dates = calibration_dates
 
-        # Create or reuse CallSession
-        self.session = CallSession(
-            customer_name=customer_name or "Customer",
-            email=email or "",
-            phone_number=phone_number or "",
-            calibration_dates=dates_list,
-        )
+        # Created once the "start" event arrives and real customer data
+        # (from Twilio's customParameters, or the fallback above) is known.
+        self.session = None
 
         # Speech services
         self.stt = get_stt_engine(os.getenv("STT_ENGINE", "elevenlabs"))
@@ -130,7 +130,32 @@ class TwilioMediaStream:
         start = data.get("start", {}) or {}
         self.stream_sid = data.get("streamSid") or start.get("streamSid")
         self.call_sid = data.get("callSid") or start.get("callSid")
-        logger.info(f"Stream started: sid={self.stream_sid} call={self.call_sid}")
+
+        # Prefer Twilio's <Parameter> values (delivered here, in the "start"
+        # event) over the URL query string fallback, since some proxies
+        # don't preserve query strings on the WSS upgrade request.
+        custom_params = start.get("customParameters", {}) or {}
+
+        customer_name = custom_params.get("customer_name") or self._fallback_customer_name
+        email = custom_params.get("email") or self._fallback_email
+        phone_number = custom_params.get("phone_number") or self._fallback_phone_number
+        calibration_dates = custom_params.get("calibration_dates") or self._fallback_calibration_dates
+
+        dates_list = []
+        if calibration_dates:
+            dates_list = [d.strip() for d in calibration_dates.split(",") if d.strip()]
+
+        self.session = CallSession(
+            customer_name=customer_name or "Customer",
+            email=email or "",
+            phone_number=phone_number or "",
+            calibration_dates=dates_list,
+        )
+
+        logger.info(
+            f"Stream started: sid={self.stream_sid} call={self.call_sid} "
+            f"customer={customer_name!r} (source={'customParameters' if custom_params.get('customer_name') else 'query-string-fallback'})"
+        )
 
         # Send Anne's opening greeting. Keep a reference so the task isn't
         # garbage-collected and its exceptions surface.
@@ -191,7 +216,7 @@ class TwilioMediaStream:
         3. Synthesize response with TTS
         4. Stream back to Twilio
         """
-        if not self.audio_buffer:
+        if not self.audio_buffer or self.session is None:
             return
 
         # Convert buffer to audio chunk
@@ -209,9 +234,18 @@ class TwilioMediaStream:
 
         except Exception as e:
             logger.error(f"STT error: {e}")
+            # Don't leave the caller in dead air - let them know and let
+            # them try again rather than silently dropping the turn.
+            await self._stream_tts_to_twilio(
+                "Sorry, I couldn't hear that clearly. Could you say that again?"
+            )
             return
 
         if not transcript or not transcript.strip():
+            logger.info("STT returned no transcript for this turn")
+            await self._stream_tts_to_twilio(
+                "Sorry, I didn't catch that. Could you repeat that, please?"
+            )
             return
 
         # Process through agent. call_graph.invoke() is synchronous and can

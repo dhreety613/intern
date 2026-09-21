@@ -197,10 +197,26 @@ async def twilio_twiml(request: Request):
 
     media_url = escape(f"wss://{host}{prefix}/media?{query}")
 
+    # Also pass data via <Parameter>, delivered in the WebSocket "start"
+    # event's customParameters. This is the primary channel media_stream.py
+    # reads from - some proxies don't reliably preserve query strings on a
+    # WSS upgrade request, so the URL query string above is only a fallback.
+    param_tags = "\n        ".join(
+        f'<Parameter name="{escape(key)}" value="{escape(value)}" />'
+        for key, value in (
+            ("customer_name", customer_name),
+            ("email", email),
+            ("phone_number", phone_number),
+            ("calibration_dates", calibration_dates),
+        )
+    )
+
     twiml = f'''<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Connect>
-        <Stream url="{media_url}" />
+        <Stream url="{media_url}">
+        {param_tags}
+        </Stream>
     </Connect>
 </Response>'''
 
