@@ -92,11 +92,13 @@ class ChatCompletionRequest(BaseModel):
 
 @router.get("/health/stt")
 async def health_stt():
-    """Actually call Google recognize() so credentials/encoding are verified."""
-    import traceback, asyncio
+    """Actually call the configured STT engine so credentials/encoding are verified."""
+    import os
+    import traceback
+    engine_name = os.getenv("STT_ENGINE", "elevenlabs")
     try:
-        from call_agent.app.speech_services import GoogleSTT
-        stt = GoogleSTT()
+        from call_agent.app.speech_services import get_stt_engine
+        stt = get_stt_engine(engine_name)
         # 0.5s of mu-law silence - won't transcribe, but exercises auth + config.
         silence = b"\xff" * 4000
 
@@ -106,11 +108,11 @@ async def health_stt():
         got = []
         async for text in stt.transcribe_stream(_gen()):
             got.append(text)
-        return {"status": "OK", "component": "GoogleSTT", "transcripts": got}
+        return {"status": "OK", "component": type(stt).__name__, "transcripts": got}
     except Exception as e:
         return {
             "status": "FAILED",
-            "component": "GoogleSTT",
+            "component": engine_name,
             "error": f"{type(e).__name__}: {e}",
             "trace": traceback.format_exc()[-1500:],
         }

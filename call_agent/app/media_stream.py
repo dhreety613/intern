@@ -7,8 +7,10 @@ from starlette.websockets import WebSocketDisconnect
 import asyncio
 from datetime import datetime, timedelta
 
+import os
+
 from call_agent.app.call import CallSession
-from call_agent.app.speech_services import GoogleSTT, get_tts_engine
+from call_agent.app.speech_services import get_stt_engine, get_tts_engine
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +62,7 @@ class TwilioMediaStream:
         )
 
         # Speech services
-        self.stt = GoogleSTT()
+        self.stt = get_stt_engine(os.getenv("STT_ENGINE", "elevenlabs"))
         self.tts = get_tts_engine("elevenlabs")
 
         # Buffers

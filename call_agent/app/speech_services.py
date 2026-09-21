@@ -1,5 +1,6 @@
 import os
 import json
+import struct
 from typing import AsyncIterator
 from google.cloud import speech_v1
 import asyncio
@@ -77,6 +78,98 @@ class GoogleSTT:
             transcript = result.alternatives[0].transcript
             if transcript and transcript.strip():
                 yield transcript
+
+
+def _wrap_mulaw_as_wav(mulaw_bytes: bytes, sample_rate: int = 8000) -> bytes:
+    """Wrap raw 8-bit mu-law samples (what Twilio Media Streams sends) in a
+    minimal WAV container (WAVE_FORMAT_MULAW = 0x0007) so STT APIs that
+    expect a real audio file can decode it."""
+    channels = 1
+    bits_per_sample = 8
+    block_align = channels * bits_per_sample // 8
+    byte_rate = sample_rate * block_align
+
+    fmt_chunk = struct.pack(
+        "<HHIIHHH",
+        7,  # wFormatTag: WAVE_FORMAT_MULAW
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bits_per_sample,
+        0,  # cbSize (no extra format bytes)
+    )
+
+    data_size = len(mulaw_bytes)
+    riff_size = 4 + (8 + len(fmt_chunk)) + (8 + data_size)
+
+    return (
+        b"RIFF" + struct.pack("<I", riff_size) + b"WAVE"
+        + b"fmt " + struct.pack("<I", len(fmt_chunk)) + fmt_chunk
+        + b"data" + struct.pack("<I", data_size) + mulaw_bytes
+    )
+
+
+# ============================================================
+# SPEECH-TO-TEXT (ElevenLabs)
+# ============================================================
+
+class ElevenLabsSTT:
+    """
+    Speech-to-Text using ElevenLabs (Scribe). Used in place of GoogleSTT
+    since it reuses the already-verified ELEVENLABS_API_KEY instead of a
+    Google Cloud project that may not have the Speech-to-Text API enabled.
+
+    ElevenLabs' endpoint is a batch upload (not gRPC streaming), so this
+    mirrors GoogleSTT's behavior: buffer the caller's audio for one turn,
+    then transcribe it in a single call.
+    """
+
+    API_BASE = "https://api.elevenlabs.io/v1"
+
+    def __init__(self):
+        self.api_key = os.getenv("ELEVENLABS_API_KEY")
+        if not self.api_key:
+            raise ValueError("ELEVENLABS_API_KEY not set")
+        self.model_id = os.getenv("ELEVENLABS_STT_MODEL_ID", "scribe_v1")
+
+    async def transcribe_stream(
+        self,
+        audio_chunks: AsyncIterator[bytes],
+    ) -> AsyncIterator[str]:
+        buffer = bytearray()
+        async for chunk in audio_chunks:
+            if chunk:
+                buffer.extend(chunk)
+
+        if not buffer:
+            return
+
+        wav_bytes = _wrap_mulaw_as_wav(bytes(buffer))
+
+        url = f"{self.API_BASE}/speech-to-text"
+        headers = {"xi-api-key": self.api_key}
+        files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+        data = {"model_id": self.model_id}
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, headers=headers, files=files, data=data)
+
+                if resp.status_code != 200:
+                    body = resp.text
+                    logger.error(f"ElevenLabs STT HTTP {resp.status_code}: {body[:800]}")
+                    raise RuntimeError(f"ElevenLabs STT {resp.status_code}: {body[:800]}")
+
+                result = resp.json()
+
+        except Exception as e:
+            logger.error(f"ElevenLabs STT error: {e}")
+            raise
+
+        text = (result.get("text") or "").strip()
+        if text:
+            yield text
 
 
 # ============================================================
@@ -235,3 +328,25 @@ def get_tts_engine(engine: str = "elevenlabs"):
         return GoogleTTS()
     else:
         raise ValueError(f"Unknown TTS engine: {engine}")
+
+
+# ============================================================
+# FACTORY: get the right STT
+# ============================================================
+
+def get_stt_engine(engine: str = "elevenlabs"):
+    """
+    Returns the configured STT engine.
+
+    Args:
+        engine: "elevenlabs" or "google"
+
+    Returns:
+        STT instance (ElevenLabsSTT or GoogleSTT)
+    """
+    if engine.lower() == "elevenlabs":
+        return ElevenLabsSTT()
+    elif engine.lower() == "google":
+        return GoogleSTT()
+    else:
+        raise ValueError(f"Unknown STT engine: {engine}")
