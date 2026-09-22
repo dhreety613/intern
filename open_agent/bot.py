@@ -137,13 +137,12 @@ async def run_bot(
     llm = GoogleLLMService(
         api_key=os.getenv("GEMINI_API_KEY"),
         settings=GoogleLLMService.Settings(
-            # gemini-3.5-flash-lite (the newest "lite" model at the time
-            # this was written) returned 503 "high demand" on two separate
-            # real test calls. gemini-2.5-flash-lite is the same cost/
-            # latency tier but a much more established model with more
-            # serving capacity - override via OPEN_AGENT_GEMINI_MODEL if
-            # you want to try a different one.
-            model=os.getenv("OPEN_AGENT_GEMINI_MODEL", "gemini-2.5-flash-lite"),
+            # gemini-2.5-flash-lite is deprecated for this API key (404:
+            # "no longer available to new users... use
+            # models/gemini-3.5-flash-lite") - that IS the current
+            # recommended lite model despite the earlier transient 503s.
+            # Override via OPEN_AGENT_GEMINI_MODEL if needed.
+            model=os.getenv("OPEN_AGENT_GEMINI_MODEL", "gemini-3.5-flash-lite"),
             system_instruction=_build_system_instruction(
                 customer_name, email, phone_number, calibration_dates, product
             ),
