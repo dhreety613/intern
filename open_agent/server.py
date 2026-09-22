@@ -47,6 +47,7 @@ async def open_agent_twiml(request: Request):
     email = params.get("email", "")
     phone_number = params.get("phone_number", "")
     calibration_dates = params.get("calibration_dates", "")
+    product = params.get("product", "")
 
     host = request.headers.get("host", request.url.netloc)
     prefix = request.url.path[: -len("/twiml")] if request.url.path.endswith("/twiml") else ""
@@ -60,6 +61,7 @@ async def open_agent_twiml(request: Request):
             ("email", email),
             ("phone_number", phone_number),
             ("calibration_dates", calibration_dates),
+            ("product", product),
         )
     )
 

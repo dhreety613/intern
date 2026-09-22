@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from loguru import logger
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineParams, PipelineWorker
 from pipecat.processors.aggregators.llm_context import LLMContext
@@ -32,6 +32,7 @@ from pipecat.runner.utils import create_transport
 from pipecat.services.elevenlabs.stt import ElevenLabsSTTService
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.google.llm import GoogleLLMService
+from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
 from pipecat.workers.runner import WorkerRunner
@@ -43,8 +44,13 @@ logger.add(sys.stderr, level="INFO")
 
 
 def _build_system_instruction(
-    customer_name: str, email: str, phone_number: str, calibration_dates: str
+    customer_name: str,
+    email: str,
+    phone_number: str,
+    calibration_dates: str,
+    product: str,
 ) -> str:
+    product_clause = f" for the {product}" if product else ""
     return (
         "You are Anne, a phone agent for KTC Instruments calling to confirm a "
         "customer's contact details and remind them of an upcoming calibration. "
@@ -52,19 +58,54 @@ def _build_system_instruction(
         "every reply short and conversational - one or two sentences, no "
         "markdown, no lists, no special characters.\n\n"
         f"Customer on file: name={customer_name!r}, email={email!r}, "
-        f"phone={phone_number!r}, next calibration date={calibration_dates!r}.\n\n"
+        f"phone={phone_number!r}, next calibration date={calibration_dates!r}, "
+        f"product={product!r}.\n\n"
         "Follow this flow, one step at a time, waiting for the customer's reply "
         "before moving to the next step:\n"
-        "1. Greet them by name and ask you're speaking with them.\n"
-        "2. Once name is confirmed (or corrected), confirm the email on file.\n"
+        "1. Greet them and ask if you're speaking with "
+        f"{customer_name}.\n"
+        "   - If they confirm, move to step 2.\n"
+        "   - If they say you have the wrong person, ask once who you're "
+        "actually speaking with. If they give a name, treat that as the "
+        "corrected name and continue to step 2. If they still can't confirm "
+        "they're the right person (e.g. this really is a wrong number), "
+        "apologize for the inconvenience, say a polite goodbye, and call "
+        "end_call.\n"
+        "2. Once name is confirmed, confirm the email on file.\n"
         "3. Once email is confirmed (or corrected), confirm the phone number on file.\n"
-        "4. Once phone is confirmed (or corrected), remind them of the calibration date.\n"
-        "5. Ask if there's anything else, then thank them and say goodbye.\n\n"
-        "If they correct a detail, acknowledge the correction and use the "
-        "corrected value from then on. If they go off topic, answer briefly and "
-        "gently steer back to the current step. Never skip a step, and never "
-        "re-ask something already confirmed."
+        f"4. Once phone is confirmed (or corrected), remind them of the "
+        f"calibration date{product_clause}.\n"
+        "5. Ask if there's anything else. When they say no / that's all, "
+        "thank them, say goodbye, and call end_call.\n\n"
+        "If they correct a detail (name, email, or phone), acknowledge the "
+        "correction and use the corrected value from then on - never re-ask "
+        "something already confirmed, and never skip a step.\n\n"
+        "If they go off topic (small talk, unrelated questions, etc.), answer "
+        "briefly and gently steer back to the current step - this counts as "
+        "one redirect. If you have redirected the caller back on topic 5 or 6 "
+        "times over the course of the call and they keep going off topic, stop "
+        "trying: say a polite goodbye explaining you'll try again another time, "
+        "and call end_call.\n\n"
+        "Always say your goodbye line out loud BEFORE calling end_call - "
+        "end_call is how you actually hang up once you've said it, in all "
+        "three cases above (wrong person, too many redirects, or normal "
+        "completion)."
     )
+
+
+async def end_call(params: FunctionCallParams):
+    """End the phone call now.
+
+    Call this immediately after you have said your goodbye line out loud -
+    whether that's because the call finished normally, the caller was
+    confirmed to be the wrong person, or you've redirected them back on
+    topic too many times without success.
+    """
+    await params.result_callback({"status": "call ending"})
+    # "downstream" (the default) flushes already-queued frames first, so the
+    # goodbye TTS audio finishes playing before the pipeline actually closes
+    # the Twilio connection.
+    await params.pipeline_worker.queue_frame(EndWorkerFrame())
 
 
 async def run_bot(
@@ -74,13 +115,14 @@ async def run_bot(
     email: str,
     phone_number: str,
     calibration_dates: str,
+    product: str,
 ):
     llm = GoogleLLMService(
         api_key=os.getenv("GEMINI_API_KEY"),
         settings=GoogleLLMService.Settings(
             model=os.getenv("OPEN_AGENT_GEMINI_MODEL", "gemini-3.5-flash-lite"),
             system_instruction=_build_system_instruction(
-                customer_name, email, phone_number, calibration_dates
+                customer_name, email, phone_number, calibration_dates, product
             ),
         ),
     )
@@ -98,7 +140,7 @@ async def run_bot(
         voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
     )
 
-    context = LLMContext()
+    context = LLMContext(tools=[end_call])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(
@@ -170,10 +212,11 @@ async def bot(runner_args: RunnerArguments):
     email = body.get("email") or ""
     phone_number = body.get("phone_number") or ""
     calibration_dates = body.get("calibration_dates") or ""
+    product = body.get("product") or ""
 
     logger.info(
         f"Call metadata - customer={customer_name!r} email={email!r} "
-        f"phone={phone_number!r} calibration={calibration_dates!r}"
+        f"phone={phone_number!r} calibration={calibration_dates!r} product={product!r}"
     )
 
     await run_bot(
@@ -183,4 +226,5 @@ async def bot(runner_args: RunnerArguments):
         email,
         phone_number,
         calibration_dates,
+        product,
     )

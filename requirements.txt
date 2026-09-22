@@ -1,3 +1,9 @@
+# Render's Python 3.12+ build environment doesn't include setuptools by
+# default; some transitive dependency (observed: something pulled in by
+# pipecat-ai) expects it to be importable. Cheap to pin explicitly rather
+# than rely on it coming along for the ride.
+setuptools
+
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 requests==2.32.3
@@ -28,5 +34,12 @@ httpx==0.28.1
 # open_agent: Pipecat-based voice pipeline (same Twilio/Gemini/ElevenLabs
 # services as call_agent, built on Pipecat's turn-detection/VAD/retry
 # handling instead of the hand-rolled version in call_agent).
-pipecat-ai[google,elevenlabs,silero,websocket,runner]==1.11.0
+# Deliberately NOT installing the "runner" extra: it pulls in a lot of
+# CLI/dev-tooling (fastapi-cloud-cli, sentry-sdk, watchfiles, ...) we
+# don't use since we call bot() directly from our own FastAPI route
+# instead of through Pipecat's own CLI runner - and it was the source of
+# a "No module named 'setuptools'" build failure on Render. Everything
+# open_agent actually imports (pipecat.runner.types/utils,
+# pipecat.pipeline.worker, pipecat.workers.runner) works fine without it.
+pipecat-ai[google,elevenlabs,silero,websocket]==1.11.0
 aiohttp
