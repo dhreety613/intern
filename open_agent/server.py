@@ -27,7 +27,7 @@ def open_agent_health():
         "service": "open-agent",
         "status": "healthy",
         "engine": "pipecat",
-        "build": "open-agent-6",
+        "build": "open-agent-7",
     }
 
 

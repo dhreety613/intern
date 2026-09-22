@@ -53,11 +53,10 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 logger.remove(0)
-# DEBUG-level logging (pipecat.services.google.llm, .worker, etc.) already
-# diagnosed the earlier silence as Gemini 503s, not a pipeline bug - back
-# to INFO for normal operation. Bump to DEBUG again if something similar
-# recurs without a clear error.
-logger.add(sys.stderr, level="INFO")
+# DEBUG: at INFO, successful LLM/TTS/STT activity isn't logged at all -
+# only errors are - so "no error logged" is not evidence anything
+# actually worked. Keep at DEBUG until this is reliably working.
+logger.add(sys.stderr, level="DEBUG")
 
 
 def _build_system_instruction(
