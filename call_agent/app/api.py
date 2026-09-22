@@ -232,7 +232,7 @@ def call_agent_health():
     return {
         "service": "call-agent",
         "status": "healthy",
-        "build": "voice-fix-11",
+        "build": "voice-fix-12",
     }
 
 

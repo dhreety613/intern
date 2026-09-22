@@ -104,6 +104,12 @@ class TwilioMediaStream:
         self._greeting_task = None
         self._processing = False
 
+        # Barge-in: set once the caller has spoken over Anne for long enough
+        # to count as an interruption, checked inside _stream_tts_to_twilio's
+        # send loop so it can stop mid-utterance instead of forcing the
+        # caller to wait out however long her whole reply takes to play.
+        self._interrupt_requested = False
+
         # session.process() runs off-thread and can't actually be cancelled
         # once started. If a turn times out (see AGENT_TIMEOUT_SECONDS), the
         # thread keeps running in the background and will still mutate
@@ -136,6 +142,7 @@ class TwilioMediaStream:
     SILENCE_HANGOVER_MS = 700  # pause length that marks end-of-turn
     MAX_BUFFER_MS = 8000  # hard cap so one long turn can't buffer forever
     MAX_SILENCE_ONLY_MS = 4000  # drop the buffer if nothing but noise for this long
+    BARGE_IN_VOICED_MS = 200  # sustained voice while Anne is speaking = interruption
 
     async def handle(self):
         """
@@ -246,13 +253,14 @@ class TwilioMediaStream:
         if not audio_chunk:
             return
 
-        # Half-duplex: ignore inbound audio while Anne is speaking, while a
-        # turn is still being processed, or while a previous (possibly
-        # slow/timed-out-from-the-caller's-view) agent call is still
-        # actually running - starting a second competing turn on top of an
-        # unfinished one is what caused every later turn to also "time out"
-        # while queued behind it.
-        if self._tts_lock.locked() or self._processing or self._agent_lock.locked():
+        anne_speaking = self._tts_lock.locked()
+
+        # While a turn is still being processed (STT/agent), or a previous
+        # (possibly slow/timed-out-from-the-caller's-view) agent call is
+        # still actually running, there's nothing playing to barge into and
+        # starting a second competing turn is what caused every later turn
+        # to also "time out" while queued behind it - drop audio as before.
+        if not anne_speaking and (self._processing or self._agent_lock.locked()):
             self.audio_buffer.clear()
             self._reset_vad_state()
             return
@@ -264,16 +272,33 @@ class TwilioMediaStream:
             logger.error(f"Failed to decode audio: {e}")
             return
 
-        self.audio_buffer.extend(audio_bytes)
         frame_ms = len(audio_bytes) / self.BYTES_PER_MS
+        voiced = self._frame_is_voiced(audio_bytes)
 
-        if self._frame_is_voiced(audio_bytes):
+        if anne_speaking and self._voiced_ms == 0.0 and not voiced:
+            # Not an interruption in progress - just line noise/echo while
+            # she's talking normally. Don't buffer it.
+            return
+
+        self.audio_buffer.extend(audio_bytes)
+
+        if voiced:
             # Customer is actively speaking - cancel any pending wait timeout.
             self._cancel_wait_timeout()
             self._voiced_ms += frame_ms
             self._silence_run_ms = 0.0
         else:
             self._silence_run_ms += frame_ms
+
+        if anne_speaking:
+            # Barge-in: sustained voice while she's still talking means the
+            # caller is interrupting, not just a stray noise. Once flagged,
+            # _stream_tts_to_twilio's send loop stops and clears Twilio's
+            # buffer. Everything buffered here carries over as the start of
+            # the caller's next turn once her stream actually stops.
+            if self._voiced_ms >= self.BARGE_IN_VOICED_MS:
+                self._interrupt_requested = True
+            return
 
         buffer_ms = len(self.audio_buffer) / self.BYTES_PER_MS
 
@@ -577,26 +602,52 @@ class TwilioMediaStream:
             return
 
         async with self._tts_lock:
+            self._interrupt_requested = False
             try:
                 leftover = b""
                 frames_sent = 0
+                interrupted = False
 
                 async for audio_chunk in self.tts.text_to_speech_stream(text):
                     if self._call_ended:
                         logger.info("Call ended mid-stream - stopping TTS output")
                         return
 
+                    if self._interrupt_requested:
+                        interrupted = True
+                        break
+
                     buf = leftover + audio_chunk
                     offset = 0
 
                     while len(buf) - offset >= self.TWILIO_FRAME_BYTES:
+                        if self._interrupt_requested:
+                            interrupted = True
+                            break
                         frame = buf[offset:offset + self.TWILIO_FRAME_BYTES]
                         offset += self.TWILIO_FRAME_BYTES
                         await self._send_media_frame(frame)
                         frames_sent += 1
                         await asyncio.sleep(self.TWILIO_FRAME_SECONDS)
 
+                    if interrupted:
+                        break
+
                     leftover = buf[offset:]
+
+                if interrupted:
+                    # Tell Twilio to discard whatever we already sent ahead
+                    # of real-time that hasn't played yet, so the caller
+                    # doesn't keep hearing Anne after they started talking.
+                    logger.info(
+                        f"Caller interrupted after {frames_sent} frames - clearing Twilio playback buffer"
+                    )
+                    await self.websocket.send_text(json.dumps({
+                        "event": "clear",
+                        "streamSid": self.stream_sid,
+                    }))
+                    self._interrupt_requested = False
+                    return
 
                 if leftover:
                     frame = leftover + b"\xff" * (self.TWILIO_FRAME_BYTES - len(leftover))
