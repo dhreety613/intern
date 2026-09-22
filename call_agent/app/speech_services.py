@@ -3,7 +3,6 @@ import json
 import re
 import struct
 from typing import AsyncIterator
-from google.cloud import speech_v1
 import asyncio
 import logging
 
@@ -18,11 +17,19 @@ logger = logging.getLogger(__name__)
 
 class GoogleSTT:
     """
-    Streaming Speech-to-Text using Google Cloud.
-    Handles real-time audio chunks and returns transcribed text.
+    Streaming Speech-to-Text using Google Cloud. Not used by default
+    (STT_ENGINE=elevenlabs is the default - see get_stt_engine below);
+    kept as a fallback path. google-cloud-speech pins protobuf<5, which
+    conflicts with newer dependencies (e.g. pipecat-ai wants protobuf>=5),
+    so it's intentionally not a hard requirement - only imported if this
+    class is actually instantiated.
     """
 
     def __init__(self):
+        from google.cloud import speech_v1
+
+        self._speech_v1 = speech_v1
+
         # Requires GOOGLE_APPLICATION_CREDENTIALS env var
         # pointing to your service account JSON key
         self.client = speech_v1.SpeechClient()
@@ -62,7 +69,7 @@ class GoogleSTT:
         if not buffer:
             return
 
-        audio = speech_v1.RecognitionAudio(content=bytes(buffer))
+        audio = self._speech_v1.RecognitionAudio(content=bytes(buffer))
 
         def _recognize():
             return self.client.recognize(config=self.config, audio=audio)
