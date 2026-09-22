@@ -45,6 +45,16 @@ from scrap_company import scrape_website
 
 from call_agent.app.api import router as call_agent_router
 
+# open_agent pulls in pipecat-ai, a much larger/newer dependency than the
+# rest of this app. If it fails to import for any reason, that must not
+# take down call_agent (or anything else in this file) - so this is
+# isolated behind a try/except instead of a top-level import.
+try:
+    from open_agent.server import router as open_agent_router
+except Exception as e:
+    logging.getLogger(__name__).error(f"open_agent failed to load, skipping: {e}")
+    open_agent_router = None
+
 
 
 class ScrapeRequest(BaseModel):
@@ -64,6 +74,12 @@ app.include_router(
     call_agent_router,
     prefix="/call-agent"
 )
+
+if open_agent_router is not None:
+    app.include_router(
+        open_agent_router,
+        prefix="/open-agent"
+    )
 
 class FullRequest(BaseModel):
     deal_id: int

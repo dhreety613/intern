@@ -20,3 +20,9 @@ elevenlabs
 
 aiofiles==24.1.0
 httpx==0.28.1
+
+# open_agent: Pipecat-based voice pipeline (same Twilio/Gemini/ElevenLabs
+# services as call_agent, built on Pipecat's turn-detection/VAD/retry
+# handling instead of the hand-rolled version in call_agent).
+pipecat-ai[google,elevenlabs,silero,websocket,runner]==1.11.0
+aiohttp
