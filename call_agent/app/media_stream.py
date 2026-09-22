@@ -15,6 +15,24 @@ from call_agent.app.speech_services import get_stt_engine, get_tts_engine
 logger = logging.getLogger(__name__)
 
 
+def _build_mulaw_to_linear_table():
+    """Standard ITU-T G.711 mu-law -> 16-bit linear PCM decode table."""
+    BIAS = 0x84
+    table = []
+    for i in range(256):
+        u = ~i & 0xFF
+        sign = u & 0x80
+        exponent = (u >> 4) & 0x07
+        mantissa = u & 0x0F
+        sample = ((mantissa << 3) + BIAS) << exponent
+        sample -= BIAS
+        table.append(-sample if sign else sample)
+    return table
+
+
+_MULAW_TO_LINEAR = _build_mulaw_to_linear_table()
+
+
 # ============================================================
 # TWILIO MEDIA STREAMS HANDLER
 # ============================================================
@@ -65,14 +83,14 @@ class TwilioMediaStream:
         self.stt = get_stt_engine(os.getenv("STT_ENGINE", "elevenlabs"))
         self.tts = get_tts_engine("elevenlabs")
 
-        # Buffers
-        # Twilio streams 8kHz mono mu-law => 8000 bytes/sec. Collect roughly
-        # 1.5s of caller audio before sending a batch to STT so utterances
-        # aren't chopped mid-word.
+        # Buffers. Twilio streams 8kHz mono mu-law => 8 bytes/ms. Rather than
+        # flushing to STT on a fixed byte count (which either grabs leading
+        # silence before the caller starts talking, or chops a longer
+        # answer mid-word), buffer continuously and use energy-based voice
+        # activity detection to flush once the caller actually pauses.
         self.audio_buffer = bytearray()
-        self.min_audio_buffer_size = 12000
-        self.silence_duration = 0
-        self.silence_threshold = 10
+        self._voiced_ms = 0.0
+        self._silence_run_ms = 0.0
 
         # TIMEOUT TRACKING
         self.last_agent_task = None
@@ -108,6 +126,15 @@ class TwilioMediaStream:
     STT_TIMEOUT_SECONDS = 20.0
     AGENT_TIMEOUT_SECONDS = 40.0
     FILLER_DELAY_SECONDS = 7.0
+
+    # Voice activity detection (energy-based) for deciding when the caller
+    # has finished a turn, instead of flushing on a fixed audio duration.
+    BYTES_PER_MS = 8  # 8kHz mono mu-law = 1 byte/sample
+    VAD_AMPLITUDE_THRESHOLD = 350  # decoded-linear amplitude above this counts as voice
+    MIN_SPEECH_MS = 300  # must hear at least this much voice before a turn can end
+    SILENCE_HANGOVER_MS = 700  # pause length that marks end-of-turn
+    MAX_BUFFER_MS = 8000  # hard cap so one long turn can't buffer forever
+    MAX_SILENCE_ONLY_MS = 4000  # drop the buffer if nothing but noise for this long
 
     async def handle(self):
         """
@@ -191,10 +218,26 @@ class TwilioMediaStream:
         self._call_ended = True
         self._cancel_wait_timeout()
 
+    def _reset_vad_state(self):
+        self._voiced_ms = 0.0
+        self._silence_run_ms = 0.0
+
+    def _frame_is_voiced(self, frame: bytes) -> bool:
+        if not frame:
+            return False
+        total = 0
+        for b in frame:
+            total += abs(_MULAW_TO_LINEAR[b])
+        return (total / len(frame)) >= self.VAD_AMPLITUDE_THRESHOLD
+
     async def _handle_media(self, data: Dict[str, Any]):
         """
         Handle incoming audio chunk from Twilio.
-        Buffer it and process when ready.
+
+        Buffers continuously and uses simple energy-based voice activity
+        detection to decide when the caller has actually finished a turn
+        (real speech followed by a pause), rather than flushing after a
+        fixed duration regardless of what's in it.
         """
         payload = data.get("media", {})
         audio_chunk = payload.get("payload")
@@ -207,23 +250,45 @@ class TwilioMediaStream:
         # get transcribed and answered.
         if self._tts_lock.locked() or self._processing:
             self.audio_buffer.clear()
+            self._reset_vad_state()
             return
-
-        # Customer provided input - cancel any pending wait timeout
-        self._cancel_wait_timeout()
 
         # Decode base64 audio
         try:
             audio_bytes = base64.b64decode(audio_chunk)
-            self.audio_buffer.extend(audio_bytes)
         except Exception as e:
             logger.error(f"Failed to decode audio: {e}")
             return
 
-        # Once enough audio is buffered, process the turn in the background so
-        # the receive loop keeps draining the socket.
-        if len(self.audio_buffer) >= self.min_audio_buffer_size:
+        self.audio_buffer.extend(audio_bytes)
+        frame_ms = len(audio_bytes) / self.BYTES_PER_MS
+
+        if self._frame_is_voiced(audio_bytes):
+            # Customer is actively speaking - cancel any pending wait timeout.
+            self._cancel_wait_timeout()
+            self._voiced_ms += frame_ms
+            self._silence_run_ms = 0.0
+        else:
+            self._silence_run_ms += frame_ms
+
+        buffer_ms = len(self.audio_buffer) / self.BYTES_PER_MS
+
+        has_enough_speech = self._voiced_ms >= self.MIN_SPEECH_MS
+        end_of_turn = has_enough_speech and self._silence_run_ms >= self.SILENCE_HANGOVER_MS
+        hit_max_duration = buffer_ms >= self.MAX_BUFFER_MS
+
+        if not has_enough_speech and buffer_ms >= self.MAX_SILENCE_ONLY_MS:
+            # Nothing but noise/silence for a while - drop it rather than
+            # growing the buffer or wasting an STT call on it.
+            self.audio_buffer.clear()
+            self._reset_vad_state()
+            return
+
+        # Flush and process the turn in the background so the receive loop
+        # keeps draining the socket.
+        if end_of_turn or hit_max_duration:
             self._processing = True
+            self._reset_vad_state()
             asyncio.create_task(self._process_turn())
 
     async def _process_turn(self):
