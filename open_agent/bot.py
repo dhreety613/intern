@@ -11,12 +11,25 @@ call_agent/app/media_stream.py. This is a fresh, standalone pipeline - it
 does not call into call_agent's LangGraph brain.
 """
 
+import logging as std_logging
 import os
 import sys
 
 import aiohttp
 from dotenv import load_dotenv
 from loguru import logger
+
+# Pipecat uses loguru; the underlying google-genai/httpx calls use the
+# stdlib logging module. These are independent systems - make sure
+# httpx's request-level logs (the concrete evidence of whether a Gemini
+# call was even attempted) aren't silently suppressed by whatever level
+# some other part of the stack leaves the "httpx" logger at.
+std_logging.getLogger("httpx").setLevel(std_logging.INFO)
+if not std_logging.getLogger().handlers:
+    std_logging.basicConfig(
+        level=std_logging.INFO,
+        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    )
 
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import EndWorkerFrame, LLMRunFrame
@@ -175,13 +188,7 @@ async def run_bot(
 
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
-        logger.info("Twilio call connected - Anne is starting")
-        # A bare system_instruction with zero messages gives the LLM
-        # nothing to respond to - it needs an actual message in the
-        # context before LLMRunFrame will produce a reply. This one just
-        # tells it to begin, per its system instruction.
-        context.add_message({"role": "user", "content": "(The call has just connected. Begin.)"})
-        await worker.queue_frames([LLMRunFrame()])
+        logger.info("on_client_connected fired")
 
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):
@@ -189,7 +196,21 @@ async def run_bot(
         await aiohttp_session.close()
         await runner.cancel()
 
+    # Kick off the conversation before starting the runner, so there's no
+    # ambiguity about whether this frame is queued before the pipeline's
+    # consumer loop exists (two prior real-call attempts, queuing from
+    # on_client_connected instead, produced zero LLM/TTS activity and zero
+    # errors - total silence until the caller gave up and hung up).
+    #
+    # A bare system_instruction with zero messages also gives the LLM
+    # nothing to respond to, so add an actual message before LLMRunFrame.
+    logger.info("Queuing initial LLMRunFrame before starting the runner")
+    context.add_message({"role": "user", "content": "(The call has just connected. Begin.)"})
+    await worker.queue_frames([LLMRunFrame()])
+    logger.info("Initial LLMRunFrame queued - starting runner")
+
     await runner.run()
+    logger.info("runner.run() returned - call is over")
 
 
 async def bot(runner_args: RunnerArguments):
