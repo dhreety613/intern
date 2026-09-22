@@ -95,11 +95,19 @@ class TwilioMediaStream:
         # session state concurrently or land out of order.
         self._agent_lock = asyncio.Lock()
 
+        # Set once Twilio's "stop" event arrives or we close the socket
+        # ourselves, so any in-flight background turn (e.g. a filler or a
+        # late agent response) knows not to try writing to a closed socket.
+        self._call_ended = False
+
     # Hard caps so a slow/hung STT or LLM call can't permanently lock the
     # half-duplex gate (self._processing) and go silent for the rest of the
-    # call.
+    # call. AGENT_TIMEOUT_SECONDS is generous because real calls have shown
+    # ~25s turns that still succeed (chained memory/brain/decision Gemini
+    # calls) - a tighter cap just interrupts otherwise-working turns.
     STT_TIMEOUT_SECONDS = 20.0
-    AGENT_TIMEOUT_SECONDS = 25.0
+    AGENT_TIMEOUT_SECONDS = 40.0
+    FILLER_DELAY_SECONDS = 7.0
 
     async def handle(self):
         """
@@ -130,6 +138,7 @@ class TwilioMediaStream:
         except Exception as e:
             logger.error(f"Media stream error: {e}", exc_info=True)
         finally:
+            self._call_ended = True
             self._cancel_wait_timeout()
             try:
                 await self.websocket.close()
@@ -179,6 +188,7 @@ class TwilioMediaStream:
     def _handle_stop(self, data: Dict[str, Any]):
         """Handle Twilio stop event."""
         logger.info(f"Stream stopped: {self.stream_sid}")
+        self._call_ended = True
         self._cancel_wait_timeout()
 
     async def _handle_media(self, data: Dict[str, Any]):
@@ -279,10 +289,15 @@ class TwilioMediaStream:
             return
 
         # Process through agent. call_graph.invoke() is synchronous, can
-        # block for seconds on LLM calls, and has no bounded timeout of its
-        # own, so run it off the event loop (to keep reading/writing the
-        # Twilio socket) and cap how long we'll wait for the same reason as
-        # the STT call above.
+        # block for seconds on LLM calls (real calls have shown ~25s for
+        # some turns - the chained memory/brain/decision Gemini calls add
+        # up), and has no bounded timeout of its own, so run it off the
+        # event loop (to keep reading/writing the Twilio socket) and cap
+        # how long we'll wait for the same reason as the STT call above.
+        # A filler plays if it's still going after a few seconds so the
+        # caller isn't met with dead air while it thinks.
+        agent_done = asyncio.Event()
+        filler_task = asyncio.create_task(self._speak_filler_if_slow(agent_done))
         try:
             result = await self._call_agent(transcript)
             response_text = result.get("response", "")
@@ -300,6 +315,9 @@ class TwilioMediaStream:
             response_text = "Sorry, I encountered an error. Could you please repeat that?"
             call_ended = False
             decision_task = "CONTINUE"
+
+        finally:
+            agent_done.set()
 
         logger.info(f"Anne: {response_text}")
         logger.info(f"Decision Task: {decision_task}")
@@ -406,6 +424,15 @@ class TwilioMediaStream:
         logger.info(f"Anne (greeting): {greeting}")
         await self._stream_tts_to_twilio(greeting)
 
+    async def _speak_filler_if_slow(self, done: asyncio.Event):
+        """Play a short "still working" line if the agent call hasn't
+        finished after FILLER_DELAY_SECONDS, so a slow turn isn't dead air."""
+        try:
+            await asyncio.wait_for(done.wait(), timeout=self.FILLER_DELAY_SECONDS)
+        except asyncio.TimeoutError:
+            if not self._call_ended:
+                await self._stream_tts_to_twilio("One moment, please.")
+
     # 8kHz mu-law => 160 bytes == 20ms. Twilio plays inbound media as
     # 20ms frames, so slice the TTS stream to that size and pace delivery.
     TWILIO_FRAME_BYTES = 160
@@ -426,12 +453,20 @@ class TwilioMediaStream:
             logger.warning("No stream_sid yet - dropping TTS output")
             return
 
+        if self._call_ended:
+            logger.info("Call already ended - dropping TTS output")
+            return
+
         async with self._tts_lock:
             try:
                 leftover = b""
                 frames_sent = 0
 
                 async for audio_chunk in self.tts.text_to_speech_stream(text):
+                    if self._call_ended:
+                        logger.info("Call ended mid-stream - stopping TTS output")
+                        return
+
                     buf = leftover + audio_chunk
                     offset = 0
 
@@ -467,6 +502,7 @@ class TwilioMediaStream:
         Twilio Media Streams has no server-sent "stop" event; closing the
         WebSocket ends the <Connect><Stream> and the call hangs up.
         """
+        self._call_ended = True
         self._cancel_wait_timeout()
         logger.info("Ending call - closing media stream")
         try:
