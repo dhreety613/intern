@@ -126,6 +126,7 @@ class TwilioMediaStream:
     STT_TIMEOUT_SECONDS = 20.0
     AGENT_TIMEOUT_SECONDS = 40.0
     FILLER_DELAY_SECONDS = 7.0
+    FILLER_REPEAT_SECONDS = 15.0
 
     # Voice activity detection (energy-based) for deciding when the caller
     # has finished a turn, instead of flushing on a fixed audio duration.
@@ -245,10 +246,13 @@ class TwilioMediaStream:
         if not audio_chunk:
             return
 
-        # Half-duplex: ignore inbound audio while Anne is speaking (or while a
-        # turn is still being processed) so her own voice / line echo doesn't
-        # get transcribed and answered.
-        if self._tts_lock.locked() or self._processing:
+        # Half-duplex: ignore inbound audio while Anne is speaking, while a
+        # turn is still being processed, or while a previous (possibly
+        # slow/timed-out-from-the-caller's-view) agent call is still
+        # actually running - starting a second competing turn on top of an
+        # unfinished one is what caused every later turn to also "time out"
+        # while queued behind it.
+        if self._tts_lock.locked() or self._processing or self._agent_lock.locked():
             self.audio_buffer.clear()
             self._reset_vad_state()
             return
@@ -354,15 +358,14 @@ class TwilioMediaStream:
             return
 
         # Process through agent. call_graph.invoke() is synchronous, can
-        # block for seconds on LLM calls (real calls have shown ~25s for
+        # block for seconds on LLM calls (real calls have shown 25-70s for
         # some turns - the chained memory/brain/decision Gemini calls add
         # up), and has no bounded timeout of its own, so run it off the
         # event loop (to keep reading/writing the Twilio socket) and cap
         # how long we'll wait for the same reason as the STT call above.
-        # A filler plays if it's still going after a few seconds so the
-        # caller isn't met with dead air while it thinks.
-        agent_done = asyncio.Event()
-        filler_task = asyncio.create_task(self._speak_filler_if_slow(agent_done))
+        # A filler plays periodically while it's still going so the caller
+        # isn't met with dead air while it thinks.
+        asyncio.create_task(self._speak_filler_while_busy())
         try:
             result = await self._call_agent(transcript)
             response_text = result.get("response", "")
@@ -370,19 +373,20 @@ class TwilioMediaStream:
             decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
 
         except asyncio.TimeoutError:
-            logger.error(f"Agent timed out after {self.AGENT_TIMEOUT_SECONDS}s")
-            response_text = "Sorry, that's taking longer than expected. Could you please repeat that?"
-            call_ended = False
-            decision_task = "CONTINUE"
+            # Don't tell the caller to repeat themselves - their answer is
+            # still being processed (see _call_agent/_deliver_late_response,
+            # which will speak the real response once it's actually ready).
+            logger.error(
+                f"Agent timed out after {self.AGENT_TIMEOUT_SECONDS}s "
+                "- will deliver the real answer once it's ready"
+            )
+            return
 
         except Exception as e:
             logger.error(f"Agent error: {e}", exc_info=True)
             response_text = "Sorry, I encountered an error. Could you please repeat that?"
             call_ended = False
             decision_task = "CONTINUE"
-
-        finally:
-            agent_done.set()
 
         logger.info(f"Anne: {response_text}")
         logger.info(f"Decision Task: {decision_task}")
@@ -413,13 +417,55 @@ class TwilioMediaStream:
         holding self._agent_lock until it truly finishes. That guarantees
         the *next* call to this method blocks until the orphaned one is
         done, so session.state is never mutated by two overlapping turns.
+
+        On timeout, the caller's real answer isn't thrown away: a
+        background task keeps waiting for it and speaks the actual response
+        once it's ready (see _deliver_late_response), instead of just
+        asking the caller to repeat something we're still processing.
         """
         async def _run():
             async with self._agent_lock:
                 return await asyncio.to_thread(self.session.process, text)
 
         task = asyncio.create_task(_run())
-        return await asyncio.wait_for(asyncio.shield(task), timeout=self.AGENT_TIMEOUT_SECONDS)
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=self.AGENT_TIMEOUT_SECONDS)
+        except asyncio.TimeoutError:
+            asyncio.create_task(self._deliver_late_response(task))
+            raise
+
+    async def _deliver_late_response(self, task: "asyncio.Task[Dict[str, Any]]"):
+        """Speak the real response from a turn that outlasted AGENT_TIMEOUT_SECONDS.
+
+        _handle_media gates new turns on self._agent_lock, so no newer turn
+        can start (and no fresher response can exist) while this is still
+        pending - it's always safe to deliver once it arrives.
+        """
+        try:
+            result = await task
+        except Exception as e:
+            logger.error(f"Late agent response failed: {e}", exc_info=True)
+            return
+
+        if self._call_ended:
+            return
+
+        response_text = result.get("response", "")
+        call_ended = result.get("call_ended", False)
+        decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
+
+        logger.info(f"Anne (late): {response_text}")
+        logger.info(f"Decision Task (late): {decision_task}")
+        self.last_agent_task = decision_task
+
+        if response_text:
+            await self._stream_tts_to_twilio(response_text)
+
+        if decision_task == "WAIT":
+            self._start_wait_timeout()
+
+        if call_ended:
+            await self._send_stop()
 
     def _start_wait_timeout(self):
         """Start a 90-second timeout for WAIT state."""
@@ -489,14 +535,22 @@ class TwilioMediaStream:
         logger.info(f"Anne (greeting): {greeting}")
         await self._stream_tts_to_twilio(greeting)
 
-    async def _speak_filler_if_slow(self, done: asyncio.Event):
-        """Play a short "still working" line if the agent call hasn't
-        finished after FILLER_DELAY_SECONDS, so a slow turn isn't dead air."""
+    async def _speak_filler_while_busy(self):
+        """Periodically reassure the caller while self._agent_lock is held.
+
+        Keyed off the lock itself (not a fixed one-shot delay) so it keeps
+        going for as long as the underlying agent call actually takes -
+        including well past AGENT_TIMEOUT_SECONDS, where the caller would
+        otherwise hear nothing until the real answer (see
+        _deliver_late_response) finally arrives.
+        """
         try:
-            await asyncio.wait_for(done.wait(), timeout=self.FILLER_DELAY_SECONDS)
-        except asyncio.TimeoutError:
-            if not self._call_ended:
-                await self._stream_tts_to_twilio("One moment, please.")
+            await asyncio.sleep(self.FILLER_DELAY_SECONDS)
+            while self._agent_lock.locked() and not self._call_ended:
+                await self._stream_tts_to_twilio("Just a moment, I'm still working on that.")
+                await asyncio.sleep(self.FILLER_REPEAT_SECONDS)
+        except asyncio.CancelledError:
+            pass
 
     # 8kHz mu-law => 160 bytes == 20ms. Twilio plays inbound media as
     # 20ms frames, so slice the TTS stream to that size and pace delivery.
