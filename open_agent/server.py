@@ -31,6 +31,34 @@ def open_agent_health():
     }
 
 
+@router.get("/health/gemini-models")
+async def open_agent_gemini_models():
+    """List models this deployment's GEMINI_API_KEY can actually use, so we
+    can pick one with headroom instead of guessing model names."""
+    import os
+    import httpx
+
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url)
+            data = resp.json()
+    except Exception as e:
+        return {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}
+
+    if resp.status_code != 200:
+        return {"status": "FAILED", "http_status": resp.status_code, "body": data}
+
+    models = [
+        {"name": m.get("name"), "displayName": m.get("displayName")}
+        for m in data.get("models", [])
+        if "generateContent" in m.get("supportedGenerationMethods", [])
+    ]
+    return {"status": "OK", "models": models}
+
+
 @router.post("/twiml")
 async def open_agent_twiml(request: Request):
     """Convert a Twilio call to a Pipecat Media Streams WebSocket.
