@@ -176,8 +176,11 @@ async def run_bot(
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info("Twilio call connected - Anne is starting")
-        # No user message yet - LLMRunFrame triggers the LLM against the
-        # system instruction alone, so Anne speaks first with the greeting.
+        # A bare system_instruction with zero messages gives the LLM
+        # nothing to respond to - it needs an actual message in the
+        # context before LLMRunFrame will produce a reply. This one just
+        # tells it to begin, per its system instruction.
+        context.add_message({"role": "user", "content": "(The call has just connected. Begin.)"})
         await worker.queue_frames([LLMRunFrame()])
 
     @transport.event_handler("on_client_disconnected")
