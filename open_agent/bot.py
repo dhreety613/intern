@@ -53,7 +53,11 @@ from pipecat.workers.runner import WorkerRunner
 load_dotenv(override=True)
 
 logger.remove(0)
-logger.add(sys.stderr, level="INFO")
+# DEBUG (not INFO): pipecat may log internal setup failures (e.g. a
+# processor failing to initialize) at a level this was previously
+# filtering out - two real-call attempts produced zero LLM/TTS/STT
+# activity and zero visible errors, which is consistent with that.
+logger.add(sys.stderr, level="DEBUG")
 
 
 def _build_system_instruction(
@@ -209,7 +213,11 @@ async def run_bot(
     await worker.queue_frames([LLMRunFrame()])
     logger.info("Initial LLMRunFrame queued - starting runner")
 
-    await runner.run()
+    try:
+        await runner.run()
+    except Exception:
+        logger.exception("runner.run() raised")
+        raise
     logger.info("runner.run() returned - call is over")
 
 
