@@ -222,6 +222,52 @@ async def twilio_twiml(request: Request):
 
     return Response(content=twiml, media_type="text/xml")
 
+@router.post("/test-call")
+def trigger_test_call(
+    request: Request,
+    customer_name: str = "Dhreety",
+    email: str = "dhreetysatapathy@gmail.com",
+    calibration_dates: str = "",
+):
+    """Place a real outbound Twilio call for manual voice-flow testing.
+
+    to/from are fixed (not accepted as params) so this endpoint can't be used
+    as an open relay to dial arbitrary numbers from the account's Twilio line.
+    """
+    import os
+    from twilio.rest import Client
+
+    TEST_TO_NUMBER = "+919040239072"
+    TEST_FROM_NUMBER = "+18578470611"
+
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    if not account_sid or not auth_token:
+        raise HTTPException(
+            status_code=500,
+            detail="TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set in this environment.",
+        )
+
+    host = request.headers.get("host", request.url.netloc)
+    prefix = request.url.path[: -len("/test-call")] if request.url.path.endswith("/test-call") else ""
+
+    query = "&".join(
+        f"{key}={quote(value, safe='')}"
+        for key, value in (
+            ("customer_name", customer_name),
+            ("email", email),
+            ("phone_number", TEST_TO_NUMBER),
+            ("calibration_dates", calibration_dates),
+        )
+    )
+    twiml_url = f"https://{host}{prefix}/twiml?{query}"
+
+    client = Client(account_sid, auth_token)
+    call = client.calls.create(to=TEST_TO_NUMBER, from_=TEST_FROM_NUMBER, url=twiml_url)
+
+    return {"call_sid": call.sid, "status": call.status, "twiml_url": twiml_url}
+
+
 # ============================================================
 # HEALTH
 # ============================================================
