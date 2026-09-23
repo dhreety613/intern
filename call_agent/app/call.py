@@ -11,6 +11,7 @@ class CallSession:
         email: str,
         phone_number: str,
         calibration_dates: List[str],
+        products: List[str] = None,
     ):
 
         self.state: Dict[str, Any] = {
@@ -22,6 +23,7 @@ class CallSession:
             "email": email,
             "phone_number": phone_number,
             "calibration_dates": calibration_dates,
+            "products": products or [],
 
             "memory": {},
 
@@ -30,6 +32,7 @@ class CallSession:
                 "email_confirmed": False,
                 "phone_confirmed": False,
                 "calibration_completed": False,
+                "calibration_guidance_offered": False,
             },
 
             "current_stage": "name_confirmation",

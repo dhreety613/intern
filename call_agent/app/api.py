@@ -39,6 +39,10 @@ class StartCallRequest(BaseModel):
         default_factory=list
     )
 
+    products: List[str] = Field(
+        default_factory=list
+    )
+
 
 class CustomerMessageRequest(BaseModel):
 
@@ -179,6 +183,7 @@ async def twilio_twiml(request: Request):
     email = params.get("email", "")
     phone_number = params.get("phone_number", "")
     calibration_dates = params.get("calibration_dates", "")
+    products = params.get("products", "")
 
     host = request.headers.get("host", request.url.netloc)
 
@@ -192,6 +197,7 @@ async def twilio_twiml(request: Request):
             ("email", email),
             ("phone_number", phone_number),
             ("calibration_dates", calibration_dates),
+            ("products", products),
         )
     )
 
@@ -208,6 +214,7 @@ async def twilio_twiml(request: Request):
             ("email", email),
             ("phone_number", phone_number),
             ("calibration_dates", calibration_dates),
+            ("products", products),
         )
     )
 
@@ -227,7 +234,8 @@ def trigger_test_call(
     request: Request,
     customer_name: str = "Dhreety",
     email: str = "dhreetysatapathy@gmail.com",
-    calibration_dates: str = "",
+    calibration_dates: str = "September 15, 2026",
+    products: str = "Digital Caliper",
 ):
     """Place a real outbound Twilio call for manual voice-flow testing.
 
@@ -258,6 +266,7 @@ def trigger_test_call(
             ("email", email),
             ("phone_number", TEST_TO_NUMBER),
             ("calibration_dates", calibration_dates),
+            ("products", products),
         )
     )
     twiml_url = f"https://{host}{prefix}/twiml?{query}"
@@ -307,6 +316,8 @@ def start_call(
         phone_number=request.phone_number,
 
         calibration_dates=request.calibration_dates,
+
+        products=request.products,
     )
 
     sessions[
@@ -608,6 +619,11 @@ async def elevenlabs_chat_completions(
         ""
     )
 
+    calibration_product = dynamic_variables.get(
+        "calibration_product",
+        ""
+    )
+
 
     # ========================================================
     # NORMALIZE CALIBRATION DATE
@@ -629,6 +645,28 @@ async def elevenlabs_chat_completions(
     else:
 
         calibration_dates = []
+
+
+    # ========================================================
+    # NORMALIZE CALIBRATION PRODUCT(S)
+    # ========================================================
+
+    if isinstance(
+        calibration_product,
+        list
+    ):
+
+        products = calibration_product
+
+    elif calibration_product:
+
+        products = [
+            str(calibration_product)
+        ]
+
+    else:
+
+        products = []
 
 
     # ========================================================
@@ -769,6 +807,8 @@ async def elevenlabs_chat_completions(
             phone_number=phone_number,
 
             calibration_dates=calibration_dates,
+
+            products=products,
         )
 
         sessions[
@@ -952,6 +992,7 @@ async def twilio_media_stream(
     email: str = "",
     phone_number: str = "",
     calibration_dates: str = "",
+    products: str = "",
     deal_id: str = "",
 ):
     """
@@ -977,6 +1018,7 @@ async def twilio_media_stream(
             email=email or "",
             phone_number=phone_number or "",
             calibration_dates=calibration_dates or "",
+            products=products or "",
         )
 
         await handler.handle()

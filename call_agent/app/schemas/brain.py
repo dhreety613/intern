@@ -6,6 +6,7 @@ class BrainProgress(BaseModel):
     email_confirmed: bool = False
     phone_confirmed: bool = False
     calibration_completed: bool = False
+    calibration_guidance_offered: bool = False
 
 
 class BrainOutput(BaseModel):

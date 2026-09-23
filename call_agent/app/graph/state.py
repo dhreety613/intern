@@ -25,6 +25,7 @@ class CallState(TypedDict, total=False):
     email: str
     phone_number: str
     calibration_dates: List[str]
+    products: List[str]
 
     # --------------------------------------------------
     # Persistent call memory

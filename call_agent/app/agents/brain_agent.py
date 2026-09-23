@@ -76,6 +76,12 @@ def get_next_stage(
     ):
         return "calibration"
 
+    if not progress.get(
+        "calibration_guidance_offered",
+        False,
+    ):
+        return "calibration_guidance"
+
     return "complete"
 
 
@@ -92,6 +98,7 @@ def brain_agent(
             "email_confirmed": False,
             "phone_confirmed": False,
             "calibration_completed": False,
+            "calibration_guidance_offered": False,
         },
     )
 
@@ -134,7 +141,7 @@ You do NOT speak to the customer.
 Your ONLY job is to maintain permanent workflow progress.
 
 WORKFLOW:
-name → email → phone → calibration → complete
+name → email → phone → calibration → calibration_guidance → complete
 
 CURRENT PROGRESS:
 {json.dumps(old_progress)}
@@ -174,6 +181,10 @@ RULES:
   It does NOT mean the phone call should end.
 - The Decision Agent alone determines whether the call ends.
 -for calibration_completed - it is justa reminder, as soon as customer RESPONDS to the date reminder it turns TRUE.
+-for calibration_guidance_offered - Anne asks whether the customer wants
+  guidance on filling out the calibration form. As soon as the customer
+  RESPONDS to that question (yes or no), calibration_guidance_offered
+  turns TRUE. It only applies once calibration_completed is already TRUE.
 
 IMPORTANT:
 
@@ -204,7 +215,8 @@ Return ONLY JSON:
     "name_confirmed": false,
     "email_confirmed": false,
     "phone_confirmed": false,
-    "calibration_completed": false
+    "calibration_completed": false,
+    "calibration_guidance_offered": false
   }}
 }}
 """
@@ -279,6 +291,16 @@ Return ONLY JSON:
             )
             or proposed.get(
                 "calibration_completed",
+                False,
+            ),
+
+        "calibration_guidance_offered":
+            old_progress.get(
+                "calibration_guidance_offered",
+                False,
+            )
+            or proposed.get(
+                "calibration_guidance_offered",
                 False,
             ),
     }

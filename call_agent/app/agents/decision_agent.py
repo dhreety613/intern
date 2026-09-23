@@ -18,6 +18,13 @@ MODEL = "gemini-3.5-flash-lite"
 
 MODEL = "gemini-3.5-flash-lite"
 
+# --------------------------------------------------------------
+# Placeholders — fill in with the real copy when available.
+# --------------------------------------------------------------
+CALIBRATION_FORM_GUIDE = "PLACEHOLDER: calibration form guidance goes here."
+GUARDRAIL_SUPPORT_EMAIL = "sales@tensitron.com"
+GUARDRAIL_SUPPORT_PHONE = "PLACEHOLDER_PHONE_NUMBER"
+
 
 def get_client():
     return genai.Client(
@@ -74,6 +81,11 @@ def decision_agent(
 
     calibration_dates = state.get(
         "calibration_dates",
+        []
+    )
+
+    products = state.get(
+        "products",
         []
     )
 
@@ -143,7 +155,7 @@ You are Anne from KTC Instruments.
 Respond naturally to the customer's CURRENT message.
 
 WORKFLOW:
-name → email → phone → calibration → complete
+name → email → phone → calibration → calibration_guidance → complete
 
 CURRENT PROGRESS:
 {json.dumps(brain_progress)}
@@ -162,6 +174,7 @@ Name: {customer_name}
 Email: {email}
 Phone: {phone_number}
 Calibration dates: {json.dumps(calibration_dates)}
+Products due for calibration: {json.dumps(products)}
 
 TASK:
 CONTINUE = normal conversation
@@ -188,14 +201,31 @@ WORKFLOW:
 saying PURPOSE in introduction is a MUST.
 
 CALIBRATION:
-Give the available calibration reminder.
-say - 'And I would just like to remind you that your calibration is due on ...'
+Give the available calibration reminder, including BOTH the date(s) AND
+the product(s) being calibrated.
+say - 'And I would just like to remind you that your calibration for
+[product] is due on [date] ...'
+If there are multiple products/dates, mention each product together with
+its corresponding date. If no products are on record, just give the
+date(s) as before.
 Do not ask whether the date works or imply a new commitment.
 After giving the reminder, wait for the customer's response.
 Do not automatically end the call.
 
+CALIBRATION GUIDANCE:
+Once calibration_completed is TRUE and calibration_guidance_offered is
+not yet TRUE, ask naturally:
+"Would you like some guidance on how to fill out the calibration form?"
+Wait for the customer's response.
+- If the customer says yes, read out the following guide to them:
+  "{CALIBRATION_FORM_GUIDE}"
+- If the customer says no or does not want it, do not read the guide;
+  just acknowledge and move on.
+Do not automatically end the call.
+
 AFTER WORKFLOW:
-Once calibration is acknowledged, the workflow is complete.
+Once calibration guidance has been offered and handled, the workflow is
+complete.
 Ask naturally:
 "Is there anything else I can help you with today?"
 Wait for the customer's response.
@@ -209,8 +239,13 @@ Only handle:
 
 Do NOT provide pricing, products/specifications, availability,
 technical support, commitments, or invented information.
-For out-of-scope requests, politely redirect; do not end for one
-out-of-scope request.
+For out-of-scope requests, do NOT say things like "I'll have our team
+message you" or "someone will get back to you". Instead say, naturally,
+something like:
+"I'm sorry, I can't help with that on this call. You can email us at
+{GUARDRAIL_SUPPORT_EMAIL} or call our team at {GUARDRAIL_SUPPORT_PHONE}
+for that."
+Do not end the call for one out-of-scope request.
 
 DIVERSION:
 Briefly redirect off-topic conversation to the call purpose.

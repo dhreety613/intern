@@ -61,6 +61,7 @@ class TwilioMediaStream:
         email: str = "",
         phone_number: str = "",
         calibration_dates: str = "",
+        products: str = "",
     ):
         self.websocket = websocket
         self.stream_sid = None
@@ -74,6 +75,7 @@ class TwilioMediaStream:
         self._fallback_email = email
         self._fallback_phone_number = phone_number
         self._fallback_calibration_dates = calibration_dates
+        self._fallback_products = products
 
         # Created once the "start" event arrives and real customer data
         # (from Twilio's customParameters, or the fallback above) is known.
@@ -199,16 +201,22 @@ class TwilioMediaStream:
         email = custom_params.get("email") or self._fallback_email
         phone_number = custom_params.get("phone_number") or self._fallback_phone_number
         calibration_dates = custom_params.get("calibration_dates") or self._fallback_calibration_dates
+        products = custom_params.get("products") or self._fallback_products
 
         dates_list = []
         if calibration_dates:
             dates_list = [d.strip() for d in calibration_dates.split(",") if d.strip()]
+
+        products_list = []
+        if products:
+            products_list = [p.strip() for p in products.split(",") if p.strip()]
 
         self.session = CallSession(
             customer_name=customer_name or "Customer",
             email=email or "",
             phone_number=phone_number or "",
             calibration_dates=dates_list,
+            products=products_list,
         )
 
         logger.info(
