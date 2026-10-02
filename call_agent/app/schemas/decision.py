@@ -39,3 +39,13 @@ class DecisionOutput(BaseModel):
             "random or unproductive conversation."
         )
     )
+
+    redirect_to_rep: bool = Field(
+        default=False,
+        description=(
+            "True only when the caller, after hearing the guardrail's "
+            "out-of-scope message and contact info, explicitly confirms "
+            "(yes) that the call should be redirected to a representative "
+            "now."
+        )
+    )

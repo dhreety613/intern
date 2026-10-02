@@ -33,6 +33,8 @@ class CallSession:
                 "phone_confirmed": False,
                 "calibration_completed": False,
                 "calibration_guidance_offered": False,
+                "calibration_guidance_wanted": False,
+                "calibration_guidance_step": 0,
             },
 
             "current_stage": "name_confirmation",

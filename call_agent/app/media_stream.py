@@ -2,6 +2,7 @@ import json
 import base64
 import logging
 from typing import Dict, Any
+from urllib.parse import quote
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 import asyncio
@@ -427,9 +428,17 @@ class TwilioMediaStream:
         # Store the decision task for timeout tracking
         self.last_agent_task = decision_task
 
+        redirect_to_rep = result.get("decision", {}).get("redirect_to_rep", False)
+
         # Synthesize and stream response
         if response_text:
             await self._stream_tts_to_twilio(response_text)
+
+        # The customer asked to be transferred to a rep after a guardrail
+        # hit - hand the live call off to Twilio and stop driving it here.
+        if redirect_to_rep:
+            await self._redirect_call_to_rep()
+            return
 
         # TIMEOUT HANDLING: If WAIT, start 90-second timer
         if decision_task == "WAIT":
@@ -486,6 +495,7 @@ class TwilioMediaStream:
         response_text = result.get("response", "")
         call_ended = result.get("call_ended", False)
         decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
+        redirect_to_rep = result.get("decision", {}).get("redirect_to_rep", False)
 
         logger.info(f"Anne (late): {response_text}")
         logger.info(f"Decision Task (late): {decision_task}")
@@ -493,6 +503,10 @@ class TwilioMediaStream:
 
         if response_text:
             await self._stream_tts_to_twilio(response_text)
+
+        if redirect_to_rep:
+            await self._redirect_call_to_rep()
+            return
 
         if decision_task == "WAIT":
             self._start_wait_timeout()
@@ -673,6 +687,62 @@ class TwilioMediaStream:
 
             except Exception as e:
                 logger.error(f"TTS streaming error: {e}", exc_info=True)
+
+    async def _redirect_call_to_rep(self):
+        """Hand the live call off to a support rep via Twilio's REST API.
+
+        Media Streams has no in-band way to bridge into <Dial> - the only
+        way to do it is to replace the live call's TwiML from outside
+        using calls(sid).update(). That tears down this <Connect><Stream>
+        (Twilio will send a "stop" event / close this socket shortly
+        after), so this is the last thing this handler does.
+        """
+        from call_agent.app.agents.decision_agent import GUARDRAIL_SUPPORT_PHONE
+
+        if not self.call_sid:
+            logger.error("Cannot redirect to rep - no call_sid for this call")
+            return
+
+        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+        if not account_sid or not auth_token:
+            logger.error(
+                "Cannot redirect to rep - TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not set"
+            )
+            return
+
+        customer_name = (
+            self.session.state.get("customer_name", "the customer")
+            if self.session else "the customer"
+        )
+
+        host = self.websocket.headers.get("host", "")
+        path = self.websocket.url.path  # e.g. "/call-agent/media"
+        prefix = path[: -len("/media")] if path.endswith("/media") else ""
+        redirect_url = (
+            f"https://{host}{prefix}/redirect-twiml"
+            f"?customer_name={quote(customer_name, safe='')}"
+        )
+
+        logger.info(
+            f"Redirecting call {self.call_sid} to rep {GUARDRAIL_SUPPORT_PHONE} "
+            f"via {redirect_url}"
+        )
+
+        try:
+            from twilio.rest import Client
+
+            client = Client(account_sid, auth_token)
+            await asyncio.to_thread(
+                client.calls(self.call_sid).update,
+                url=redirect_url,
+                method="POST",
+            )
+        except Exception as e:
+            logger.error(f"Failed to redirect call to rep: {e}", exc_info=True)
+            return
+
+        await self._send_stop()
 
     async def _send_stop(self):
         """End the call by closing the Media Stream socket.

@@ -229,6 +229,53 @@ async def twilio_twiml(request: Request):
 
     return Response(content=twiml, media_type="text/xml")
 
+@router.api_route("/redirect-twiml", methods=["GET", "POST"])
+async def redirect_twiml(request: Request, customer_name: str = "the customer"):
+    """TwiML that bridges a live call to a support rep.
+
+    Twilio requests this when a live call is redirected via
+    calls(sid).update(url=...) - see
+    TwilioMediaStream._redirect_call_to_rep. The <Number url=...>
+    attribute points back at /redirect-whisper, which plays a short
+    "screening" announcement to the rep only (not the caller) before the
+    call bridges.
+    """
+    from call_agent.app.agents.decision_agent import GUARDRAIL_SUPPORT_PHONE
+
+    host = request.headers.get("host", request.url.netloc)
+    prefix = request.url.path[: -len("/redirect-twiml")] if request.url.path.endswith("/redirect-twiml") else ""
+    whisper_url = escape(
+        f"https://{host}{prefix}/redirect-whisper?customer_name={quote(customer_name, safe='')}"
+    )
+
+    twiml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Dial>
+        <Number url="{whisper_url}">{escape(GUARDRAIL_SUPPORT_PHONE)}</Number>
+    </Dial>
+</Response>'''
+
+    return Response(content=twiml, media_type="text/xml")
+
+
+@router.api_route("/redirect-whisper", methods=["GET", "POST"])
+async def redirect_whisper(customer_name: str = "the customer"):
+    """Announcement played only to the rep before the call bridges
+    (Twilio's call-screening pattern on <Number url=...>)."""
+
+    message = escape(
+        f"Connecting you now. You will be speaking with {customer_name} "
+        "about a calibration query."
+    )
+
+    twiml = f'''<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Say>{message}</Say>
+</Response>'''
+
+    return Response(content=twiml, media_type="text/xml")
+
+
 @router.post("/test-call")
 def trigger_test_call(
     request: Request,

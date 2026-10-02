@@ -21,9 +21,18 @@ MODEL = "gemini-3.5-flash-lite"
 # --------------------------------------------------------------
 # Placeholders — fill in with the real copy when available.
 # --------------------------------------------------------------
-CALIBRATION_FORM_GUIDE = "PLACEHOLDER: calibration form guidance goes here."
+CALIBRATION_FORM_GUIDE_STEPS = [
+    "PLACEHOLDER STEP 1: Open the calibration form we emailed you.",
+    "PLACEHOLDER STEP 2: Enter your equipment's serial number in the first field.",
+    "PLACEHOLDER STEP 3: Enter today's date in the calibration date field.",
+    "PLACEHOLDER STEP 4: Sign and date the bottom of the form.",
+    "PLACEHOLDER STEP 5: Email the completed form back to us at the same address you received it from.",
+]
 GUARDRAIL_SUPPORT_EMAIL = "sales@tensitron.com"
-GUARDRAIL_SUPPORT_PHONE = "PLACEHOLDER_PHONE_NUMBER"
+# Also the number the call gets redirected to when the caller asks for a
+# rep (see TwilioMediaStream._redirect_call_to_rep) - for now this is the
+# same test number used elsewhere, until a real rep line is wired in.
+GUARDRAIL_SUPPORT_PHONE = "+919040239072"
 
 
 def get_client():
@@ -109,6 +118,9 @@ def decision_agent(
             "email_confirmed": False,
             "phone_confirmed": False,
             "calibration_completed": False,
+            "calibration_guidance_offered": False,
+            "calibration_guidance_wanted": False,
+            "calibration_guidance_step": 0,
         }
     )
 
@@ -116,6 +128,22 @@ def decision_agent(
         "current_stage",
         "name_confirmation"
     )
+
+    # ========================================================
+    # CALIBRATION GUIDANCE STEP (see CALIBRATION_FORM_GUIDE_STEPS)
+    # ========================================================
+
+    guidance_step_index = brain_progress.get(
+        "calibration_guidance_step",
+        0
+    )
+
+    total_guidance_steps = len(CALIBRATION_FORM_GUIDE_STEPS)
+
+    if 0 <= guidance_step_index < total_guidance_steps:
+        current_guidance_step_text = CALIBRATION_FORM_GUIDE_STEPS[guidance_step_index]
+    else:
+        current_guidance_step_text = ""
 
     # ========================================================
     # CONTEXT
@@ -178,7 +206,11 @@ Products due for calibration: {json.dumps(products)}
 
 TASK:
 CONTINUE = normal conversation
-WAIT = customer asks to wait/hold or is temporarily unavailable
+WAIT = customer asks to wait/hold or is temporarily unavailable, OR Anne
+just asked a yes/no question she needs an answer to before continuing
+(the guardrail redirect offer, or confirming a calibration guidance
+step) and is waiting on the customer's answer - this starts a
+silence timeout so the call doesn't go dead if they don't respond
 CLARIFY = unclear after current message + context
 END_CALL = customer clearly wants to end, is unavailable/wrong person,
 or prolonged random/unproductive conversation requires ending
@@ -216,11 +248,27 @@ CALIBRATION GUIDANCE:
 Once calibration_completed is TRUE and calibration_guidance_offered is
 not yet TRUE, ask naturally:
 "Would you like some guidance on how to fill out the calibration form?"
-Wait for the customer's response.
-- If the customer says yes, read out the following guide to them:
-  "{CALIBRATION_FORM_GUIDE}"
-- If the customer says no or does not want it, do not read the guide;
-  just acknowledge and move on.
+Wait for the customer's response (present_task = WAIT until they answer).
+- If the customer says no or does not want it, acknowledge and move
+  straight to AFTER WORKFLOW. Do not read any steps.
+- If the customer says yes, they now want guidance - move to the
+  step-by-step guidance below, starting at step index 0.
+
+STEP-BY-STEP GUIDANCE (only once the customer has said yes above):
+Current step index (0-based): {guidance_step_index}
+Total steps: {total_guidance_steps}
+- If the current step index is less than the total steps, say ONLY the
+  one step below out loud - do not read ahead, do not summarize more
+  than this step, do not combine it with the next step:
+  "{current_guidance_step_text}"
+  Then set present_task to WAIT and wait for the customer to confirm
+  they've done it or understood it (e.g. "ok", "got it", "done", "yes")
+  before continuing. Do not move to the next step until they confirm
+  this one. If they don't respond, the call's own silence-timeout will
+  prompt again / end the call as usual - just keep waiting.
+- Once the customer has confirmed the last step (current step index
+  reaches the total), all guidance has been given - move straight to
+  AFTER WORKFLOW.
 Do not automatically end the call.
 
 AFTER WORKFLOW:
@@ -241,10 +289,16 @@ Do NOT provide pricing, products/specifications, availability,
 technical support, commitments, or invented information.
 For out-of-scope requests, do NOT say things like "I'll have our team
 message you" or "someone will get back to you". Instead say, naturally,
-something like:
-"I'm sorry, I can't help with that on this call. You can email us at
-{GUARDRAIL_SUPPORT_EMAIL} or call our team at {GUARDRAIL_SUPPORT_PHONE}
-for that."
+in one reply:
+"I'm sorry, I can't help with that on this call. Please contact
+{GUARDRAIL_SUPPORT_EMAIL} or {GUARDRAIL_SUPPORT_PHONE} for that. Would
+you like me to redirect this call to a representative now?"
+Wait for the customer's response (present_task = WAIT until they answer).
+- If they say yes, set redirect_to_rep to TRUE and reply with a short
+  confirmation such as "Sure, connecting you now." Do not call END_CALL
+  for this - the transfer itself takes over the call afterward.
+- If they say no, set redirect_to_rep to FALSE, acknowledge, and resume
+  the workflow from wherever it left off.
 Do not end the call for one out-of-scope request.
 
 DIVERSION:
@@ -271,7 +325,8 @@ Return ONLY JSON:
   "present_task": "CONTINUE",
   "needs_context": false,
   "topic_diversion": false,
-  "random_conversation": false
+  "random_conversation": false,
+  "redirect_to_rep": false
 }}
 """
 

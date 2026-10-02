@@ -7,6 +7,8 @@ class BrainProgress(BaseModel):
     phone_confirmed: bool = False
     calibration_completed: bool = False
     calibration_guidance_offered: bool = False
+    calibration_guidance_wanted: bool = False
+    calibration_guidance_step: int = 0
 
 
 class BrainOutput(BaseModel):
