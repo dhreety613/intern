@@ -230,22 +230,31 @@ async def twilio_twiml(request: Request):
     return Response(content=twiml, media_type="text/xml")
 
 @router.api_route("/redirect-twiml", methods=["GET", "POST"])
-async def redirect_twiml(request: Request, customer_name: str = "the customer"):
+async def redirect_twiml(
+    request: Request,
+    customer_name: str = "the customer",
+    reason: str = "",
+):
     """TwiML that bridges a live call to a support rep.
 
     Twilio requests this when a live call is redirected via
     calls(sid).update(url=...) - see
-    TwilioMediaStream._redirect_call_to_rep. The <Number url=...>
-    attribute points back at /redirect-whisper, which plays a short
-    "screening" announcement to the rep only (not the caller) before the
-    call bridges.
+    TwilioMediaStream._redirect_call_to_rep. `reason` is whatever the
+    caller actually needed help with (set by the Decision Agent - a
+    guardrail miss, or the caller just asking for a person, about any
+    topic, not just calibration) and is only used for the rep's whisper
+    announcement below. The <Number url=...> attribute points back at
+    /redirect-whisper, which plays that announcement to the rep only
+    (not the caller) before the call bridges.
     """
     from call_agent.app.agents.decision_agent import GUARDRAIL_SUPPORT_PHONE
 
     host = request.headers.get("host", request.url.netloc)
     prefix = request.url.path[: -len("/redirect-twiml")] if request.url.path.endswith("/redirect-twiml") else ""
     whisper_url = escape(
-        f"https://{host}{prefix}/redirect-whisper?customer_name={quote(customer_name, safe='')}"
+        f"https://{host}{prefix}/redirect-whisper"
+        f"?customer_name={quote(customer_name, safe='')}"
+        f"&reason={quote(reason, safe='')}"
     )
 
     twiml = f'''<?xml version="1.0" encoding="UTF-8"?>
@@ -259,13 +268,20 @@ async def redirect_twiml(request: Request, customer_name: str = "the customer"):
 
 
 @router.api_route("/redirect-whisper", methods=["GET", "POST"])
-async def redirect_whisper(customer_name: str = "the customer"):
+async def redirect_whisper(customer_name: str = "the customer", reason: str = ""):
     """Announcement played only to the rep before the call bridges
-    (Twilio's call-screening pattern on <Number url=...>)."""
+    (Twilio's call-screening pattern on <Number url=...>).
+
+    `reason` is free text set by the Decision Agent for whatever the
+    caller actually needed - not assumed to be calibration-related.
+    """
+
+    reason = reason.strip()
+    topic_clause = f" about {reason}" if reason else ""
 
     message = escape(
-        f"Connecting you now. You will be speaking with {customer_name} "
-        "about a calibration query."
+        f"Connecting you now. You will be speaking with {customer_name}"
+        f"{topic_clause}."
     )
 
     twiml = f'''<?xml version="1.0" encoding="UTF-8"?>

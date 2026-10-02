@@ -428,16 +428,20 @@ class TwilioMediaStream:
         # Store the decision task for timeout tracking
         self.last_agent_task = decision_task
 
-        redirect_to_rep = result.get("decision", {}).get("redirect_to_rep", False)
+        decision_data = result.get("decision", {})
+        redirect_to_rep = decision_data.get("redirect_to_rep", False)
+        redirect_reason = decision_data.get("redirect_reason", "")
 
         # Synthesize and stream response
         if response_text:
             await self._stream_tts_to_twilio(response_text)
 
-        # The customer asked to be transferred to a rep after a guardrail
-        # hit - hand the live call off to Twilio and stop driving it here.
+        # The customer confirmed a handoff to a rep (could follow a
+        # guardrail miss, or just the customer asking for a person,
+        # about any topic) - hand the live call off to Twilio and stop
+        # driving it here.
         if redirect_to_rep:
-            await self._redirect_call_to_rep()
+            await self._redirect_call_to_rep(redirect_reason)
             return
 
         # TIMEOUT HANDLING: If WAIT, start 90-second timer
@@ -494,8 +498,10 @@ class TwilioMediaStream:
 
         response_text = result.get("response", "")
         call_ended = result.get("call_ended", False)
-        decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
-        redirect_to_rep = result.get("decision", {}).get("redirect_to_rep", False)
+        decision_data = result.get("decision", {})
+        decision_task = decision_data.get("present_task", "CONTINUE")
+        redirect_to_rep = decision_data.get("redirect_to_rep", False)
+        redirect_reason = decision_data.get("redirect_reason", "")
 
         logger.info(f"Anne (late): {response_text}")
         logger.info(f"Decision Task (late): {decision_task}")
@@ -505,7 +511,7 @@ class TwilioMediaStream:
             await self._stream_tts_to_twilio(response_text)
 
         if redirect_to_rep:
-            await self._redirect_call_to_rep()
+            await self._redirect_call_to_rep(redirect_reason)
             return
 
         if decision_task == "WAIT":
@@ -688,8 +694,14 @@ class TwilioMediaStream:
             except Exception as e:
                 logger.error(f"TTS streaming error: {e}", exc_info=True)
 
-    async def _redirect_call_to_rep(self):
+    async def _redirect_call_to_rep(self, reason: str = ""):
         """Hand the live call off to a support rep via Twilio's REST API.
+
+        `reason` is whatever the caller actually needed (set by the
+        Decision Agent - a guardrail miss, or the caller just asking for
+        a person, about any topic at all, not just calibration). It's
+        passed through so the rep's whisper announcement can say what
+        the call is about instead of a fixed guess.
 
         Media Streams has no in-band way to bridge into <Dial> - the only
         way to do it is to replace the live call's TwiML from outside
@@ -722,6 +734,7 @@ class TwilioMediaStream:
         redirect_url = (
             f"https://{host}{prefix}/redirect-twiml"
             f"?customer_name={quote(customer_name, safe='')}"
+            f"&reason={quote(reason, safe='')}"
         )
 
         logger.info(

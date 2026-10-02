@@ -43,9 +43,20 @@ class DecisionOutput(BaseModel):
     redirect_to_rep: bool = Field(
         default=False,
         description=(
-            "True only when the caller, after hearing the guardrail's "
-            "out-of-scope message and contact info, explicitly confirms "
-            "(yes) that the call should be redirected to a representative "
-            "now."
+            "True only when the caller has explicitly confirmed (yes) "
+            "that the call should be redirected to a representative "
+            "now - whether that offer came from a guardrail miss or "
+            "from the caller directly asking for a person/human/rep."
+        )
+    )
+
+    redirect_reason: str = Field(
+        default="",
+        description=(
+            "Only set when redirect_to_rep is true: a short natural-"
+            "language phrase for what the caller actually needs help "
+            "with (e.g. 'a pricing question', 'an order status update'). "
+            "Not limited to calibration - whatever the caller's topic "
+            "actually was."
         )
     )
