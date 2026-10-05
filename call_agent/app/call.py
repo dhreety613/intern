@@ -1,5 +1,6 @@
 from typing import Any, Dict, List
 
+from call_agent.app.agents.calibration_guide import handle_guidance_turn
 from call_agent.app.graph.graph import call_graph
 
 
@@ -32,12 +33,19 @@ class CallSession:
                 "email_confirmed": False,
                 "phone_confirmed": False,
                 "calibration_completed": False,
-                "calibration_guidance_offered": False,
-                "calibration_guidance_wanted": False,
-                "calibration_guidance_step": 0,
             },
 
             "current_stage": "name_confirmation",
+
+            # Calibration form guidance (offer + step-by-step
+            # walkthrough) is deterministic, not Gemini-tracked - see
+            # calibration_guide.py. "none" -> not reached yet / the
+            # offer question is about to be asked by the normal
+            # workflow; "offered" -> waiting on yes/no to the offer;
+            # "walking" -> mid-walkthrough; "done" -> resume normal
+            # workflow ("anything else?" + end call).
+            "guidance_phase": "none",
+            "guidance_step_idx": 0,
 
             "brain_output": {},
             "decision": {},
@@ -103,6 +111,45 @@ class CallSession:
             user_message
         )
 
+        guidance_phase = self.state.get("guidance_phase", "none")
+
+        # Once the calibration-guidance offer has actually been made,
+        # everything through the end of the walkthrough is handled
+        # deterministically (no Gemini) - see calibration_guide.py's
+        # module docstring for why. The graph is only re-entered once
+        # this sub-flow reports "done".
+        if guidance_phase in ("offered", "walking"):
+            guidance_result = handle_guidance_turn(
+                guidance_phase,
+                self.state.get("guidance_step_idx", 0),
+                user_message,
+            )
+
+            self.state["guidance_phase"] = guidance_result["phase"]
+            self.state["guidance_step_idx"] = guidance_result["step_idx"]
+
+            response = guidance_result["response"]
+            if response:
+                self.add_message("assistant", response)
+
+            return {
+                "response": response,
+                "decision": {
+                    "response": response,
+                    "present_task": guidance_result["present_task"],
+                    "needs_context": False,
+                    "topic_diversion": False,
+                    "random_conversation": False,
+                    "redirect_to_rep": False,
+                    "redirect_reason": "",
+                },
+                "brain": self.state.get("brain_output", {}),
+                "progress": self.state.get("progress", {}),
+                "memory": self.state.get("memory", {}),
+                "current_stage": self.state.get("current_stage", ""),
+                "call_ended": guidance_result["call_ended"],
+            }
+
         result = call_graph.invoke(
             self.state
         )
@@ -127,6 +174,16 @@ class CallSession:
                 "assistant",
                 response
             )
+
+        # The Gemini graph just asked the calibration-guidance offer
+        # question this turn (CURRENT STAGE reached "complete" with
+        # GUIDANCE PHASE still "none" going in) - from the next customer
+        # reply onward, the deterministic branch above takes over.
+        if (
+            guidance_phase == "none"
+            and self.state.get("progress", {}).get("calibration_completed")
+        ):
+            self.state["guidance_phase"] = "offered"
 
         return {
 

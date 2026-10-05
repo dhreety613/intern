@@ -44,6 +44,14 @@ class CallState(TypedDict, total=False):
     brain_output: Dict[str, Any]
 
     # --------------------------------------------------
+    # Calibration guidance (deterministic, not Gemini-tracked -
+    # see calibration_guide.py / call.py)
+    # --------------------------------------------------
+
+    guidance_phase: str
+    guidance_step_idx: int
+
+    # --------------------------------------------------
     # Decision output
     # --------------------------------------------------
 

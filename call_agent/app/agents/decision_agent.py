@@ -21,18 +21,12 @@ MODEL = "gemini-3.5-flash-lite"
 # --------------------------------------------------------------
 # Placeholders — fill in with the real copy when available.
 # --------------------------------------------------------------
-CALIBRATION_FORM_GUIDE_STEPS = [
-    "PLACEHOLDER STEP 1: Open the calibration form we emailed you.",
-    "PLACEHOLDER STEP 2: Enter your equipment's serial number in the first field.",
-    "PLACEHOLDER STEP 3: Enter today's date in the calibration date field.",
-    "PLACEHOLDER STEP 4: Sign and date the bottom of the form.",
-    "PLACEHOLDER STEP 5: Email the completed form back to us at the same address you received it from.",
-]
 GUARDRAIL_SUPPORT_EMAIL = "sales@tensitron.com"
 # Also the number the call gets redirected to when the caller asks for a
-# rep (see TwilioMediaStream._redirect_call_to_rep) - for now this is the
-# same test number used elsewhere, until a real rep line is wired in.
-GUARDRAIL_SUPPORT_PHONE = "+919040239072"
+# rep (see TwilioMediaStream._redirect_call_to_rep) - the real sales
+# line, used both as the spoken contact number and the live transfer
+# target.
+GUARDRAIL_SUPPORT_PHONE = "+17022301616"
 
 
 def get_client():
@@ -118,9 +112,6 @@ def decision_agent(
             "email_confirmed": False,
             "phone_confirmed": False,
             "calibration_completed": False,
-            "calibration_guidance_offered": False,
-            "calibration_guidance_wanted": False,
-            "calibration_guidance_step": 0,
         }
     )
 
@@ -130,20 +121,21 @@ def decision_agent(
     )
 
     # ========================================================
-    # CALIBRATION GUIDANCE STEP (see CALIBRATION_FORM_GUIDE_STEPS)
+    # CALIBRATION GUIDANCE PHASE
+    #
+    # Tracked outside Brain/this prompt entirely (see
+    # calibration_guide.py + call.py) - the offer's yes/no and the
+    # step-by-step walkthrough are deterministic, no LLM involved, so
+    # an LLM reading a URL/phone number verbatim never risks garbling
+    # it. This prompt only ever sees "none" (ask the offer) or "done"
+    # (resume normal workflow) - never "offered"/"walking", since those
+    # turns bypass this prompt entirely.
     # ========================================================
 
-    guidance_step_index = brain_progress.get(
-        "calibration_guidance_step",
-        0
+    guidance_phase = state.get(
+        "guidance_phase",
+        "none"
     )
-
-    total_guidance_steps = len(CALIBRATION_FORM_GUIDE_STEPS)
-
-    if 0 <= guidance_step_index < total_guidance_steps:
-        current_guidance_step_text = CALIBRATION_FORM_GUIDE_STEPS[guidance_step_index]
-    else:
-        current_guidance_step_text = ""
 
     # ========================================================
     # CONTEXT
@@ -183,13 +175,19 @@ You are Anne from KTC Instruments.
 Respond naturally to the customer's CURRENT message.
 
 WORKFLOW:
-name → email → phone → calibration → calibration_guidance → complete
+name → email → phone → calibration → complete
+
+(After "complete", a separate non-LLM system offers calibration-form
+guidance and, if wanted, walks through it - see GUIDANCE PHASE below.)
 
 CURRENT PROGRESS:
 {json.dumps(brain_progress)}
 
 CURRENT STAGE:
 {current_stage}
+
+GUIDANCE PHASE:
+{guidance_phase}
 
 CUSTOMER:
 {user_message}
@@ -208,9 +206,9 @@ TASK:
 CONTINUE = normal conversation
 WAIT = customer asks to wait/hold or is temporarily unavailable, OR Anne
 just asked a yes/no question she needs an answer to before continuing
-(the human-handoff redirect offer, or confirming a calibration guidance
-step) and is waiting on the customer's answer - this starts a
-silence timeout so the call doesn't go dead if they don't respond
+(the human-handoff redirect offer, or the calibration guidance offer)
+and is waiting on the customer's answer - this starts a silence timeout
+so the call doesn't go dead if they don't respond
 CLARIFY = unclear after current message + context
 END_CALL = customer clearly wants to end, is unavailable/wrong person,
 or prolonged random/unproductive conversation requires ending
@@ -244,44 +242,26 @@ Do not ask whether the date works or imply a new commitment.
 After giving the reminder, wait for the customer's response.
 Do not automatically end the call.
 As soon as the customer acknowledges the reminder, calibration_completed
-becomes TRUE - your very next reply is the CALIBRATION GUIDANCE question
+becomes TRUE - your very next reply is the CALIBRATION GUIDANCE OFFER
 below, not a generic "you're welcome" / "anything else" wrap-up.
 
-CALIBRATION GUIDANCE:
-This fires the moment CURRENT STAGE above is "calibration_guidance" and
-calibration_guidance_offered is FALSE. When that's the case, your ENTIRE
-response for this turn MUST be the question below, asked naturally, on
-its own - do not merge it with a thank-you, do not skip it, and do not
-jump ahead to asking "is there anything else":
+CALIBRATION GUIDANCE OFFER:
+This fires the moment CURRENT STAGE above is "complete" AND GUIDANCE
+PHASE above is "none" - meaning the calibration reminder was just
+acknowledged and nobody has asked about guidance yet. When that's the
+case, your ENTIRE response for this turn must be, on its own, nothing
+else added:
 "Would you like some guidance on how to fill out the calibration form?"
-Wait for the customer's response (present_task = WAIT until they answer).
-- If the customer says no or does not want it, acknowledge and move
-  straight to AFTER WORKFLOW. Do not read any steps.
-- If the customer says yes, they now want guidance - move to the
-  step-by-step guidance below, starting at step index 0.
-
-STEP-BY-STEP GUIDANCE (only once the customer has said yes above):
-Current step index (0-based): {guidance_step_index}
-Total steps: {total_guidance_steps}
-- If the current step index is less than the total steps, say ONLY the
-  one step below out loud - do not read ahead, do not summarize more
-  than this step, do not combine it with the next step:
-  "{current_guidance_step_text}"
-  Then set present_task to WAIT and wait for the customer to confirm
-  they've done it or understood it (e.g. "ok", "got it", "done", "yes")
-  before continuing. Do not move to the next step until they confirm
-  this one. If they don't respond, the call's own silence-timeout will
-  prompt again / end the call as usual - just keep waiting.
-- Once the customer has confirmed the last step (current step index
-  reaches the total), all guidance has been given - move straight to
-  AFTER WORKFLOW.
-Do not automatically end the call.
+present_task = WAIT.
+A separate, non-LLM system (not this prompt) handles everything after
+this offer - the customer's yes/no answer, and the full step-by-step
+walkthrough if they say yes. You will never see those turns; there is
+nothing else for you to do about calibration guidance.
 
 AFTER WORKFLOW:
-Only once CURRENT STAGE above is "complete" - meaning calibration
-guidance has been asked about, and if wanted, fully walked through -
-is the workflow actually finished. Never ask this while CURRENT STAGE
-is still "calibration_guidance".
+Only once GUIDANCE PHASE above is "done" is the workflow actually
+finished. Never ask this while GUIDANCE PHASE is "none" - the
+CALIBRATION GUIDANCE OFFER above owns that turn instead.
 Ask naturally:
 "Is there anything else I can help you with today?"
 Wait for the customer's response.
