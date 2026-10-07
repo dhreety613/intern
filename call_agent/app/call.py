@@ -1,7 +1,11 @@
 from typing import Any, Dict, List
 
 from call_agent.app.agents.calibration_guide import handle_guidance_turn
-from call_agent.app.graph.graph import call_graph
+from call_agent.app.agents.voicemail_agent import (
+    VOICEMAIL_MESSAGE,
+    looks_like_voicemail,
+)
+from call_agent.app.graph.graph import call_graph, start_graph
 
 
 class CallSession:
@@ -77,13 +81,20 @@ class CallSession:
     # START CALL
     # ========================================================
 
-    def start(self) -> str:
+    def start(self, answered_by: str = "") -> str:
+        """Run the pre-greeting graph: voicemail -> fixed message + end
+        call, otherwise Anne's normal opening."""
 
-        opening = (
-            "Hi, this is Anne from Tensitron, calling to confirm your contact details registered with us. "
-            f"Am I speaking with "
-            f"{self.state['customer_name']}?"
-        )
+        result = start_graph.invoke({
+            "customer_name": self.state["customer_name"],
+            "answered_by": answered_by,
+        })
+
+        opening = result["decision"]["response"]
+
+        if result.get("is_voicemail"):
+            self.state["call_ended"] = True
+            self.state["is_voicemail"] = True
 
         self.add_message(
             "assistant",
@@ -102,6 +113,34 @@ class CallSession:
     ) -> Dict[str, Any]:
 
         self.state["user_message"] = user_message
+
+        # Safety net for voicemails Twilio's AMD missed: the first customer
+        # turns sound like a greeting recording, not a person.
+        if (
+            len(self.state["conversation"]) <= 3
+            and looks_like_voicemail(user_message)
+        ):
+            self.add_message("user", user_message)
+            self.add_message("assistant", VOICEMAIL_MESSAGE)
+            self.state["call_ended"] = True
+            self.state["is_voicemail"] = True
+            return {
+                "response": VOICEMAIL_MESSAGE,
+                "decision": {
+                    "response": VOICEMAIL_MESSAGE,
+                    "present_task": "END_CALL",
+                    "needs_context": False,
+                    "topic_diversion": False,
+                    "random_conversation": False,
+                    "redirect_to_rep": False,
+                    "redirect_reason": "",
+                },
+                "brain": self.state.get("brain_output", {}),
+                "progress": self.state.get("progress", {}),
+                "memory": self.state.get("memory", {}),
+                "current_stage": self.state.get("current_stage", ""),
+                "call_ended": True,
+            }
 
         # IMPORTANT:
         # Customer message enters conversation BEFORE

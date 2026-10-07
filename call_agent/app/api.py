@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 from xml.sax.saxutils import escape
@@ -9,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from call_agent.app.call import CallSession
 from call_agent.app.media_stream import TwilioMediaStream
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(
@@ -185,6 +189,16 @@ async def twilio_twiml(request: Request):
     calibration_dates = params.get("calibration_dates", "")
     products = params.get("products", "")
 
+    # Twilio POSTs AnsweredBy here when the call was created with
+    # MachineDetection (machine_* = voicemail). Absent otherwise.
+    answered_by = ""
+    try:
+        form = await request.form()
+        answered_by = str(form.get("AnsweredBy", "") or "")
+    except Exception:
+        pass
+    answered_by = answered_by or params.get("AnsweredBy", "")
+
     host = request.headers.get("host", request.url.netloc)
 
     # Mirror whatever prefix this router is mounted under (e.g. /call-agent).
@@ -198,6 +212,7 @@ async def twilio_twiml(request: Request):
             ("phone_number", phone_number),
             ("calibration_dates", calibration_dates),
             ("products", products),
+            ("answered_by", answered_by),
         )
     )
 
@@ -215,6 +230,7 @@ async def twilio_twiml(request: Request):
             ("phone_number", phone_number),
             ("calibration_dates", calibration_dates),
             ("products", products),
+            ("answered_by", answered_by),
         )
     )
 
@@ -341,6 +357,7 @@ def trigger_test_call(
         url=twiml_url,
         record=True,
         recording_channels="dual",
+        machine_detection="DetectMessageEnd",
     )
 
     return {"call_sid": call.sid, "status": call.status, "twiml_url": twiml_url}

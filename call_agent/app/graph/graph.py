@@ -8,6 +8,10 @@ from call_agent.app.graph.context import get_recent_context
 from call_agent.app.agents.memory_agent import memory_agent
 from call_agent.app.agents.brain_agent import brain_agent
 from call_agent.app.agents.decision_agent import decision_agent
+from call_agent.app.agents.voicemail_agent import (
+    is_machine_answer,
+    voicemail_agent,
+)
 
 
 # ============================================================
@@ -220,3 +224,73 @@ def build_graph():
 
 
 call_graph = build_graph()
+
+
+# ============================================================
+# START GRAPH (runs once, before the greeting)
+#
+# START -> voicemail_check -+-> voicemail_agent -> END   (machine)
+#                           +-> greeting -------> END   (human)
+# ============================================================
+
+def voicemail_check(
+    state: CallState,
+) -> Dict[str, Any]:
+
+    return {
+        "is_voicemail": is_machine_answer(
+            state.get("answered_by", "")
+        )
+    }
+
+
+def route_after_voicemail_check(
+    state: CallState,
+) -> str:
+
+    return "voicemail_agent" if state.get("is_voicemail") else "greeting"
+
+
+def greeting(
+    state: CallState,
+) -> Dict[str, Any]:
+
+    opening = (
+        "Hi, this is Anne from Tensitron, calling to confirm your contact details registered with us. "
+        f"Am I speaking with {state.get('customer_name', '')}?"
+    )
+
+    return {
+        "decision": {
+            "response": opening,
+            "present_task": "CONTINUE",
+        },
+        "call_ended": False,
+    }
+
+
+def build_start_graph():
+
+    graph = StateGraph(
+        CallState
+    )
+
+    graph.add_node("voicemail_check", voicemail_check)
+    graph.add_node("voicemail_agent", voicemail_agent)
+    graph.add_node("greeting", greeting)
+
+    graph.add_edge(START, "voicemail_check")
+
+    graph.add_conditional_edges(
+        "voicemail_check",
+        route_after_voicemail_check,
+        ["voicemail_agent", "greeting"],
+    )
+
+    graph.add_edge("voicemail_agent", END)
+    graph.add_edge("greeting", END)
+
+    return graph.compile()
+
+
+start_graph = build_start_graph()

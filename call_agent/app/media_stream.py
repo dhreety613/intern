@@ -81,6 +81,7 @@ class TwilioMediaStream:
         # Created once the "start" event arrives and real customer data
         # (from Twilio's customParameters, or the fallback above) is known.
         self.session = None
+        self._answered_by = ""
 
         # Speech services
         self.stt = get_stt_engine(os.getenv("STT_ENGINE", "elevenlabs"))
@@ -203,6 +204,7 @@ class TwilioMediaStream:
         phone_number = custom_params.get("phone_number") or self._fallback_phone_number
         calibration_dates = custom_params.get("calibration_dates") or self._fallback_calibration_dates
         products = custom_params.get("products") or self._fallback_products
+        self._answered_by = custom_params.get("answered_by", "")
 
         dates_list = []
         if calibration_dates:
@@ -584,9 +586,15 @@ class TwilioMediaStream:
 
     async def _send_opening_greeting(self):
         """Send Anne's opening greeting to caller."""
-        greeting = self.session.start()
-        logger.info(f"Anne (greeting): {greeting}")
+        greeting = self.session.start(answered_by=self._answered_by)
+        logger.info(
+            f"Anne (greeting): {greeting} (answered_by={self._answered_by!r})"
+        )
         await self._stream_tts_to_twilio(greeting)
+
+        # Voicemail: the fixed message is the whole call - hang up.
+        if self.session.state.get("is_voicemail"):
+            await self._send_stop()
 
     async def _speak_filler_while_busy(self):
         """Periodically reassure the caller while self._agent_lock is held.

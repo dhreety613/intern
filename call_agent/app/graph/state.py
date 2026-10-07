@@ -68,3 +68,10 @@ class CallState(TypedDict, total=False):
     # --------------------------------------------------
 
     call_ended: bool
+
+    # --------------------------------------------------
+    # Pre-greeting voicemail check
+    # --------------------------------------------------
+
+    answered_by: str
+    is_voicemail: bool
