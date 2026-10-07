@@ -245,6 +245,29 @@ async def twilio_twiml(request: Request):
 
     return Response(content=twiml, media_type="text/xml")
 
+@router.post("/amd-callback")
+async def amd_callback(request: Request):
+    """Twilio's async answering-machine-detection result for a live call.
+
+    If a machine answered, the matching media stream says the fixed
+    voicemail line and hangs up. Humans/unknown results are ignored, so
+    the normal flow carries on untouched.
+    """
+    from call_agent.app.agents.voicemail_agent import is_machine_answer
+    from call_agent.app.media_stream import ACTIVE_STREAMS
+
+    form = await request.form()
+    call_sid = str(form.get("CallSid", "") or "")
+    answered_by = str(form.get("AnsweredBy", "") or "")
+    logger.info(f"AMD callback: call={call_sid} answered_by={answered_by}")
+
+    stream = ACTIVE_STREAMS.get(call_sid)
+    if stream and is_machine_answer(answered_by):
+        asyncio.create_task(stream.handle_voicemail())
+
+    return Response(status_code=204)
+
+
 @router.api_route("/redirect-twiml", methods=["GET", "POST"])
 async def redirect_twiml(
     request: Request,
@@ -350,6 +373,8 @@ def trigger_test_call(
     )
     twiml_url = f"https://{host}{prefix}/twiml?{query}"
 
+    amd_url = f"https://{host}{prefix}/amd-callback"
+
     client = Client(account_sid, auth_token)
     call = client.calls.create(
         to=TEST_TO_NUMBER,
@@ -358,6 +383,9 @@ def trigger_test_call(
         record=True,
         recording_channels="dual",
         machine_detection="DetectMessageEnd",
+        async_amd=True,
+        async_amd_status_callback=amd_url,
+        async_amd_status_callback_method="POST",
     )
 
     return {"call_sid": call.sid, "status": call.status, "twiml_url": twiml_url}

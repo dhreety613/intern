@@ -34,6 +34,11 @@ def _build_mulaw_to_linear_table():
 _MULAW_TO_LINEAR = _build_mulaw_to_linear_table()
 
 
+# Live streams by Twilio CallSid, so the async answering-machine callback
+# (api.py /amd-callback) can reach the call it is about.
+ACTIVE_STREAMS: Dict[str, "TwilioMediaStream"] = {}
+
+
 # ============================================================
 # TWILIO MEDIA STREAMS HANDLER
 # ============================================================
@@ -128,6 +133,10 @@ class TwilioMediaStream:
         # late agent response) knows not to try writing to a closed socket.
         self._call_ended = False
 
+        # Set when Twilio's async AMD says a machine picked up; from then on
+        # the normal conversation is dropped in favour of the fixed message.
+        self._voicemail = False
+
     # Hard caps so a slow/hung STT or LLM call can't permanently lock the
     # half-duplex gate (self._processing) and go silent for the rest of the
     # call. AGENT_TIMEOUT_SECONDS is generous because real calls have shown
@@ -179,6 +188,8 @@ class TwilioMediaStream:
         finally:
             self._call_ended = True
             self._cancel_wait_timeout()
+            if self.call_sid and ACTIVE_STREAMS.get(self.call_sid) is self:
+                del ACTIVE_STREAMS[self.call_sid]
             try:
                 await self.websocket.close()
             except Exception:
@@ -193,6 +204,8 @@ class TwilioMediaStream:
         start = data.get("start", {}) or {}
         self.stream_sid = data.get("streamSid") or start.get("streamSid")
         self.call_sid = data.get("callSid") or start.get("callSid")
+        if self.call_sid:
+            ACTIVE_STREAMS[self.call_sid] = self
 
         # Prefer Twilio's <Parameter> values (delivered here, in the "start"
         # event) over the URL query string fallback, since some proxies
@@ -262,6 +275,9 @@ class TwilioMediaStream:
         audio_chunk = payload.get("payload")
 
         if not audio_chunk:
+            return
+
+        if self._voicemail:
             return
 
         anne_speaking = self._tts_lock.locked()
@@ -346,7 +362,7 @@ class TwilioMediaStream:
         3. Synthesize response with TTS
         4. Stream back to Twilio
         """
-        if not self.audio_buffer or self.session is None:
+        if not self.audio_buffer or self.session is None or self._voicemail:
             return
 
         # Convert buffer to audio chunk
@@ -424,6 +440,9 @@ class TwilioMediaStream:
             call_ended = False
             decision_task = "CONTINUE"
 
+        if self._voicemail:
+            return
+
         logger.info(f"Anne: {response_text}")
         logger.info(f"Decision Task: {decision_task}")
 
@@ -495,7 +514,7 @@ class TwilioMediaStream:
             logger.error(f"Late agent response failed: {e}", exc_info=True)
             return
 
-        if self._call_ended:
+        if self._call_ended or self._voicemail:
             return
 
         response_text = result.get("response", "")
@@ -596,6 +615,28 @@ class TwilioMediaStream:
         if self.session.state.get("is_voicemail"):
             await self._send_stop()
 
+    async def handle_voicemail(self):
+        """Twilio's async AMD says a machine answered: cut off whatever
+        Anne is saying, leave the fixed message and hang up."""
+        from call_agent.app.agents.voicemail_agent import VOICEMAIL_MESSAGE
+
+        if self._voicemail or self._call_ended:
+            return
+
+        logger.info(f"Voicemail detected for call {self.call_sid}")
+        self._voicemail = True
+        self._cancel_wait_timeout()
+        self.audio_buffer.clear()
+
+        # Stop any greeting/reply in progress, then wait for the TTS lock.
+        self._interrupt_requested = True
+        if self.session is not None:
+            self.session.state["is_voicemail"] = True
+            self.session.state["call_ended"] = True
+
+        await self._stream_tts_to_twilio(VOICEMAIL_MESSAGE)
+        await self._send_stop()
+
     async def _speak_filler_while_busy(self):
         """Periodically reassure the caller while self._agent_lock is held.
 
@@ -607,7 +648,11 @@ class TwilioMediaStream:
         """
         try:
             await asyncio.sleep(self.FILLER_DELAY_SECONDS)
-            while self._agent_lock.locked() and not self._call_ended:
+            while (
+                self._agent_lock.locked()
+                and not self._call_ended
+                and not self._voicemail
+            ):
                 await self._stream_tts_to_twilio("Just a moment, I'm still working on that.")
                 await asyncio.sleep(self.FILLER_REPEAT_SECONDS)
         except asyncio.CancelledError:
