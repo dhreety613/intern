@@ -1,6 +1,10 @@
 from typing import Any, Dict, List
 
-from call_agent.app.agents.calibration_guide import handle_guidance_turn
+from call_agent.app.agents.calibration_guide import (
+    handle_guidance_turn,
+    start_walkthrough,
+    wants_guidance,
+)
 from call_agent.app.agents.ivr_agent import looks_like_ivr
 from call_agent.app.agents.voicemail_agent import (
     VOICEMAIL_MESSAGE,
@@ -186,12 +190,22 @@ class CallSession:
         # deterministically (no Gemini) - see calibration_guide.py's
         # module docstring for why. The graph is only re-entered once
         # this sub-flow reports "done".
-        if guidance_phase in ("offered", "walking"):
-            guidance_result = handle_guidance_turn(
-                guidance_phase,
-                self.state.get("guidance_step_idx", 0),
-                user_message,
-            )
+        # Asking for guidance at any other time (after declining, before
+        # the offer, mid-call) also switches to the scripted walkthrough
+        # from step 1, instead of letting Gemini make the steps up.
+        guidance_requested = (
+            guidance_phase in ("none", "done") and wants_guidance(user_message)
+        )
+
+        if guidance_phase in ("offered", "walking") or guidance_requested:
+            if guidance_requested:
+                guidance_result = start_walkthrough()
+            else:
+                guidance_result = handle_guidance_turn(
+                    guidance_phase,
+                    self.state.get("guidance_step_idx", 0),
+                    user_message,
+                )
 
             self.state["guidance_phase"] = guidance_result["phase"]
             self.state["guidance_step_idx"] = guidance_result["step_idx"]
