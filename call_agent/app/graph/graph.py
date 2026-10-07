@@ -8,6 +8,8 @@ from call_agent.app.graph.context import get_recent_context
 from call_agent.app.agents.memory_agent import memory_agent
 from call_agent.app.agents.brain_agent import brain_agent
 from call_agent.app.agents.decision_agent import decision_agent
+from call_agent.app.greeting import opening_message
+from call_agent.app.agents.ivr_agent import ivr_agent, ivr_respond
 from call_agent.app.agents.voicemail_agent import (
     is_machine_answer,
     voicemail_agent,
@@ -147,6 +149,26 @@ def finalize_call(
 
 
 # ============================================================
+# IVR ROUTING
+# ============================================================
+
+def route_after_ivr_check(
+    state: CallState,
+):
+
+    result = state.get("ivr_result", {})
+
+    # Pressed a voicemail option and now hear the greeting: fixed line.
+    if result.get("action") == "voicemail":
+        return ["voicemail_agent"]
+
+    if result.get("is_ivr") or result.get("action") == "restart":
+        return ["ivr_respond"]
+
+    return ["memory", "brain"]
+
+
+# ============================================================
 # GRAPH
 # ============================================================
 
@@ -176,6 +198,19 @@ def build_graph():
         finalize_call
     )
 
+    # IVR layer: every customer turn is first checked for an automated
+    # phone menu. If it is one, Anne presses keys silently (ivr_respond)
+    # instead of running the normal Memory/Brain/Decision workflow.
+    graph.add_node(
+        "ivr_check",
+        ivr_agent
+    )
+
+    graph.add_node(
+        "ivr_respond",
+        ivr_respond
+    )
+
     # --------------------------------------------------------
     # IMPORTANT DEPENDENCY
     #
@@ -186,12 +221,28 @@ def build_graph():
 
     graph.add_edge(
         START,
-        "memory"
+        "ivr_check"
+    )
+
+    graph.add_conditional_edges(
+        "ivr_check",
+        route_after_ivr_check,
+        ["memory", "brain", "ivr_respond", "voicemail_agent"],
+    )
+
+    graph.add_node(
+        "voicemail_agent",
+        voicemail_agent
     )
 
     graph.add_edge(
-        START,
-        "brain"
+        "voicemail_agent",
+        "finalize"
+    )
+
+    graph.add_edge(
+        "ivr_respond",
+        "finalize"
     )
 
     graph.add_edge(
@@ -255,10 +306,7 @@ def greeting(
     state: CallState,
 ) -> Dict[str, Any]:
 
-    opening = (
-        "Hi, this is Anne from Tensitron, calling to confirm your contact details registered with us. "
-        f"Am I speaking with {state.get('customer_name', '')}?"
-    )
+    opening = opening_message(state.get("customer_name", ""))
 
     return {
         "decision": {

@@ -1,6 +1,7 @@
 from typing import Any, Dict, List
 
 from call_agent.app.agents.calibration_guide import handle_guidance_turn
+from call_agent.app.agents.ivr_agent import looks_like_ivr
 from call_agent.app.agents.voicemail_agent import (
     VOICEMAIL_MESSAGE,
     looks_like_voicemail,
@@ -60,7 +61,34 @@ class CallSession:
             },
 
             "call_ended": False,
+
+            # Voicemail phrase check runs only until this turns True.
+            "human_confirmed": False,
         }
+
+    def _restart_conversation(self):
+        """Reset everything except customer data and IVR bookkeeping."""
+        self.state.update({
+            "conversation": [],
+            "context": [],
+            "memory": {},
+            "progress": {
+                "name_confirmed": False,
+                "email_confirmed": False,
+                "phone_confirmed": False,
+                "calibration_completed": False,
+            },
+            "current_stage": "name_confirmation",
+            "guidance_phase": "none",
+            "guidance_step_idx": 0,
+            "brain_output": {},
+            "call_progress": {
+                "topic_diversion_count": 0,
+                "random_conversation_count": 0,
+            },
+            "call_ended": False,
+            "human_confirmed": True,  # a human joined after the IVR
+        })
 
     # ========================================================
     # ADD MESSAGE
@@ -114,11 +142,12 @@ class CallSession:
 
         self.state["user_message"] = user_message
 
-        # Safety net for voicemails Twilio's AMD missed: the first customer
-        # turns sound like a greeting recording, not a person.
+        # Voicemail phrase check - only until a human is confirmed. IVR menus
+        # say "to leave a message, press 2": that is a menu, not a greeting.
         if (
-            len(self.state["conversation"]) <= 3
+            not self.state.get("human_confirmed")
             and looks_like_voicemail(user_message)
+            and not looks_like_ivr(user_message)
         ):
             self.add_message("user", user_message)
             self.add_message("assistant", VOICEMAIL_MESSAGE)
@@ -195,6 +224,21 @@ class CallSession:
 
         # Update persistent session state
         self.state.update(result)
+
+        # A human joined after the IVR menu: forget the menu chatter and
+        # restart the whole workflow from the beginning. The response
+        # below is then the scripted opening.
+        if result.get("ivr_result", {}).get("action") == "restart":
+            self._restart_conversation()
+
+        # A person has answered the name question (or the flow has moved
+        # past it): stop looking for voicemail phrases.
+        if (
+            self.state.get("progress", {}).get("name_confirmed")
+            or self.state.get("current_stage", "name_confirmation")
+            != "name_confirmation"
+        ):
+            self.state["human_confirmed"] = True
 
         decision = result.get(
             "decision",

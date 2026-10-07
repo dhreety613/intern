@@ -75,3 +75,14 @@ class CallState(TypedDict, total=False):
 
     answered_by: str
     is_voicemail: bool
+
+    # --------------------------------------------------
+    # IVR navigation (see agents/ivr_agent.py)
+    # --------------------------------------------------
+
+    # True once a real person is confirmed on the line; the voicemail
+    # phrase check only runs while this is False.
+    human_confirmed: bool
+
+    ivr: Dict[str, Any]
+    ivr_result: Dict[str, Any]

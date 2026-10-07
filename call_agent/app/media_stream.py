@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import os
 
 from call_agent.app.call import CallSession
+from call_agent.app.dtmf import dtmf_ulaw
 from call_agent.app.speech_services import get_stt_engine, get_tts_engine
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,8 @@ class TwilioMediaStream:
         # late agent response) knows not to try writing to a closed socket.
         self._call_ended = False
 
+        self._voicemail_key_task = None
+
         # Set when Twilio's async AMD says a machine picked up; from then on
         # the normal conversation is dropped in favour of the fixed message.
         self._voicemail = False
@@ -146,6 +149,12 @@ class TwilioMediaStream:
     AGENT_TIMEOUT_SECONDS = 40.0
     FILLER_DELAY_SECONDS = 7.0
     FILLER_REPEAT_SECONDS = 15.0
+
+    # After pressing a voicemail option there may be only a beep, no spoken
+    # greeting. If no menu/greeting takes over within this long (and the far
+    # end is quiet), leave the fixed message anyway.
+    VOICEMAIL_KEY_WAIT_SECONDS = 5
+    VOICEMAIL_KEY_MAX_SECONDS = 15
 
     # Voice activity detection (energy-based) for deciding when the caller
     # has finished a turn, instead of flushing on a fixed audio duration.
@@ -188,6 +197,8 @@ class TwilioMediaStream:
         finally:
             self._call_ended = True
             self._cancel_wait_timeout()
+            if self._voicemail_key_task:
+                self._voicemail_key_task.cancel()
             if self.call_sid and ACTIVE_STREAMS.get(self.call_sid) is self:
                 del ACTIVE_STREAMS[self.call_sid]
             try:
@@ -404,6 +415,8 @@ class TwilioMediaStream:
 
         if not transcript or not transcript.strip():
             logger.info("STT returned no transcript for this turn")
+            if self.session.state.get("ivr", {}).get("active"):
+                return
             await self._stream_tts_to_twilio(
                 "Sorry, I didn't catch that. Could you repeat that, please?"
             )
@@ -456,6 +469,12 @@ class TwilioMediaStream:
         # Synthesize and stream response
         if response_text:
             await self._stream_tts_to_twilio(response_text)
+
+        # IVR navigation: press the chosen key (Anne stays silent).
+        if decision_data.get("dtmf"):
+            await self._send_dtmf(decision_data["dtmf"])
+            if decision_data.get("voicemail_key"):
+                self._arm_voicemail_key_timer()
 
         # The customer confirmed a handoff to a rep (could follow a
         # guardrail miss, or just the customer asking for a person,
@@ -530,6 +549,11 @@ class TwilioMediaStream:
 
         if response_text:
             await self._stream_tts_to_twilio(response_text)
+
+        if decision_data.get("dtmf"):
+            await self._send_dtmf(decision_data["dtmf"])
+            if decision_data.get("voicemail_key"):
+                self._arm_voicemail_key_timer()
 
         if redirect_to_rep:
             await self._redirect_call_to_rep(redirect_reason)
@@ -615,12 +639,57 @@ class TwilioMediaStream:
         if self.session.state.get("is_voicemail"):
             await self._send_stop()
 
-    async def handle_voicemail(self):
+    def _arm_voicemail_key_timer(self):
+        if self._voicemail_key_task and not self._voicemail_key_task.done():
+            self._voicemail_key_task.cancel()
+        self._voicemail_key_task = asyncio.create_task(
+            self._voicemail_key_timer()
+        )
+
+    async def _voicemail_key_timer(self):
+        """After a voicemail key press: if nothing else takes over (no menu,
+        no spoken greeting consumed the press), say the fixed line."""
+        try:
+            waited = 0
+            while waited < self.VOICEMAIL_KEY_MAX_SECONDS and not self._call_ended:
+                await asyncio.sleep(1)
+                waited += 1
+                quiet = (
+                    not self._processing
+                    and self._voiced_ms == 0.0
+                    and not self._tts_lock.locked()
+                )
+                if waited >= self.VOICEMAIL_KEY_WAIT_SECONDS and quiet:
+                    break
+
+            if self._call_ended or self.session is None:
+                return
+            # A spoken greeting/menu turn already handled it (flag reset).
+            if not self.session.state.get("ivr", {}).get("pressed_voicemail"):
+                return
+
+            logger.info("Voicemail key pressed, no greeting heard - leaving message")
+            await self.handle_voicemail(force=True)
+        except asyncio.CancelledError:
+            pass
+
+    async def handle_voicemail(self, force: bool = False):
         """Twilio's async AMD says a machine answered: cut off whatever
         Anne is saying, leave the fixed message and hang up."""
         from call_agent.app.agents.voicemail_agent import VOICEMAIL_MESSAGE
 
         if self._voicemail or self._call_ended:
+            return
+
+        # An IVR menu is also "a machine" to Twilio's AMD - if we've already
+        # heard one on this call, keep navigating it instead of leaving the
+        # voicemail line and hanging up.
+        if (
+            not force
+            and self.session is not None
+            and self.session.state.get("ivr", {}).get("seen")
+        ):
+            logger.info("AMD says machine but an IVR was detected - ignoring")
             return
 
         logger.info(f"Voicemail detected for call {self.call_sid}")
@@ -669,6 +738,22 @@ class TwilioMediaStream:
             "streamSid": self.stream_sid,
             "media": {"payload": base64.b64encode(frame).decode("utf-8")},
         }))
+
+    async def _send_dtmf(self, digits: str):
+        """Press keys on the far end by sending DTMF tones as call audio."""
+        if not self.stream_sid or self._call_ended:
+            return
+
+        async with self._tts_lock:
+            for digit in digits:
+                logger.info(f"IVR: pressing {digit!r}")
+                audio = dtmf_ulaw(digit)
+                for i in range(0, len(audio), self.TWILIO_FRAME_BYTES):
+                    frame = audio[i:i + self.TWILIO_FRAME_BYTES]
+                    if len(frame) < self.TWILIO_FRAME_BYTES:
+                        frame += b"\xff" * (self.TWILIO_FRAME_BYTES - len(frame))
+                    await self._send_media_frame(frame)
+                    await asyncio.sleep(self.TWILIO_FRAME_SECONDS)
 
     async def _stream_tts_to_twilio(self, text: str):
         """

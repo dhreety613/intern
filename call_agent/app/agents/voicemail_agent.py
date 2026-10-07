@@ -3,13 +3,10 @@
 Deterministic (no LLM): if the call was picked up by an answering machine,
 leave a fixed message and hang up instead of running the normal workflow.
 
-Detection comes from two places:
-  1. Twilio AMD - the `AnsweredBy` value (needs `MachineDetection` on the
-     call-creation request; with DetectMessageEnd Twilio waits for the
-     greeting + beep to finish before connecting the stream, so the
-     message lands on the recording).
-  2. A phrase check on the first customer turns, as a safety net when AMD
-     said "human"/"unknown" or wasn't requested.
+Triggered by: Twilio's async AMD flagging a machine (call forwarded to
+voicemail), the IVR agent having pressed a voicemail option, or - only
+until a human is confirmed on the line (state["human_confirmed"]) - the
+customer's speech sounding like a voicemail greeting.
 """
 
 from typing import Any, Dict
@@ -46,13 +43,13 @@ _VOICEMAIL_PHRASES = (
 )
 
 
-def is_machine_answer(answered_by: str) -> bool:
-    return (answered_by or "").strip().lower() in _MACHINE_ANSWERED_BY
-
-
 def looks_like_voicemail(text: str) -> bool:
     lowered = (text or "").lower()
     return any(phrase in lowered for phrase in _VOICEMAIL_PHRASES)
+
+
+def is_machine_answer(answered_by: str) -> bool:
+    return (answered_by or "").strip().lower() in _MACHINE_ANSWERED_BY
 
 
 def voicemail_agent(state: Dict[str, Any]) -> Dict[str, Any]:
