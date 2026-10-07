@@ -49,8 +49,12 @@ class CallMemory(BaseModel):
 
     wrong_number_so_avoid: bool = False
 
-    # Customer wants another call
+    # Customer wants another call (free text, as said)
     call_again_when: Optional[str] = None
+
+    # The earliest date (YYYY-MM-DD) we may call again, ONLY when the
+    # customer gave a proper date. Used to build the n8n calling queue.
+    next_call_date: Optional[str] = None
 
     # Customer wants a human representative
     wants_human_call: bool = False

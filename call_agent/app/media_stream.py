@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import os
 
 from call_agent.app.call import CallSession
+from call_agent.app.call_result import build_call_result, deliver_call_result
 from call_agent.app.dtmf import dtmf_ulaw
 from call_agent.app.speech_services import get_stt_engine, get_tts_engine
 
@@ -89,6 +90,9 @@ class TwilioMediaStream:
         # (from Twilio's customParameters, or the fallback above) is known.
         self.session = None
         self._answered_by = ""
+        self._person_id = ""
+        self._deal_id = ""
+        self._result_sent = False
 
         # Speech services
         self.stt = get_stt_engine(os.getenv("STT_ENGINE", "elevenlabs"))
@@ -200,6 +204,7 @@ class TwilioMediaStream:
             self._cancel_wait_timeout()
             if self._voicemail_key_task:
                 self._voicemail_key_task.cancel()
+            await self._send_call_result()
             if self.call_sid and ACTIVE_STREAMS.get(self.call_sid) is self:
                 del ACTIVE_STREAMS[self.call_sid]
             try:
@@ -230,6 +235,8 @@ class TwilioMediaStream:
         calibration_dates = custom_params.get("calibration_dates") or self._fallback_calibration_dates
         products = custom_params.get("products") or self._fallback_products
         self._answered_by = custom_params.get("answered_by", "")
+        self._person_id = custom_params.get("person_id", "")
+        self._deal_id = custom_params.get("deal_id", "")
 
         dates_list = []
         if calibration_dates:
@@ -680,6 +687,22 @@ class TwilioMediaStream:
             await self.handle_voicemail(force=True)
         except asyncio.CancelledError:
             pass
+
+    async def _send_call_result(self):
+        """Once per call, when the stream ends: report the outcome."""
+        if self._result_sent or self.session is None:
+            return
+        self._result_sent = True
+        try:
+            result = build_call_result(
+                self.session.state,
+                self.call_sid or "",
+                self._person_id,
+                self._deal_id,
+            )
+            await deliver_call_result(result)
+        except Exception as e:
+            logger.error(f"Failed to send call result: {e}", exc_info=True)
 
     async def handle_voicemail(self, force: bool = False):
         """Twilio's async AMD says a machine answered: cut off whatever

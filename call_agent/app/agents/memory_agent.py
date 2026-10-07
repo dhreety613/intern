@@ -2,6 +2,7 @@ import json
 import re
 from typing import Any, Dict
 import os
+from datetime import date
 
 from google import genai
 
@@ -80,7 +81,14 @@ RULES:
 - Contact-update email request → email_crm_update_confirmation=true.
 - "Don't call again"/"stop calling" → do_not_call=true.
 - Wrong number/person → wrong_number_so_avoid=true.
-- Callback request → call_again_when.
+- Callback request → call_again_when (their words).
+- If the customer says when we may call again AND it is a proper, resolvable
+  date (an explicit date like "after October 20", or a clear relative one
+  like "in two weeks" / "next Monday"), also set next_call_date to that date
+  as YYYY-MM-DD, computed from TODAY below. Vague answers ("later", "some
+  time", "when I'm free") → leave next_call_date null. Never guess a date.
+- "Do not call"/"stop calling"/"remove me" → do_not_call=true (it stays false
+  otherwise; never set it true from anything else).
 - Human request → wants_human_call=true.
 - Named human → wants_who.
 - Human callback time → wants_human_call_when.
@@ -89,6 +97,8 @@ RULES:
 - Never guess.
 - Structured fields are authoritative.
 -facts you feel are important and might be needed to be known by management later about th call store them in important_facts. NOT every line and NOT facts already being stored in the schema. Things special and edge case facts only.
+
+TODAY: {date.today().isoformat()}
 
 CURRENT:
 {user_message}
@@ -115,6 +125,7 @@ Return ONLY JSON matching this schema:
     "do_not_call": false,
     "wrong_number_so_avoid": false,
     "call_again_when": null,
+    "next_call_date": null,
     "wants_human_call": false,
     "wants_who": null,
     "wants_human_call_when": null,
@@ -148,6 +159,20 @@ Return ONLY JSON matching this schema:
             f"{response.text}"
         ) from exc
 
+    memory_dict = memory.model_dump()
+
+    # Keep next_call_date only if it is a real future date.
+    ncd = memory_dict.get("next_call_date")
+    if ncd:
+        try:
+            if date.fromisoformat(str(ncd)[:10]) <= date.today():
+                ncd = None
+            else:
+                ncd = str(ncd)[:10]
+        except ValueError:
+            ncd = None
+    memory_dict["next_call_date"] = ncd
+
     return {
-        "memory": memory.model_dump()
+        "memory": memory_dict
     }

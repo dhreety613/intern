@@ -188,6 +188,8 @@ async def twilio_twiml(request: Request):
     phone_number = params.get("phone_number", "")
     calibration_dates = params.get("calibration_dates", "")
     products = params.get("products", "")
+    person_id = params.get("person_id", "")
+    deal_id = params.get("deal_id", "")
 
     # Twilio POSTs AnsweredBy here when the call was created with
     # MachineDetection (machine_* = voicemail). Absent otherwise.
@@ -213,6 +215,8 @@ async def twilio_twiml(request: Request):
             ("calibration_dates", calibration_dates),
             ("products", products),
             ("answered_by", answered_by),
+            ("person_id", person_id),
+            ("deal_id", deal_id),
         )
     )
 
@@ -231,6 +235,8 @@ async def twilio_twiml(request: Request):
             ("calibration_dates", calibration_dates),
             ("products", products),
             ("answered_by", answered_by),
+            ("person_id", person_id),
+            ("deal_id", deal_id),
         )
     )
 
