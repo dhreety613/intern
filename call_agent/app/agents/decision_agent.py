@@ -200,7 +200,7 @@ Name: {customer_name}
 Email: {email}
 Phone: {phone_number}
 Calibration dates: {json.dumps(calibration_dates)}
-Products due for calibration: {json.dumps(products)}
+Serial numbers of the Tensitron meters due for calibration: {json.dumps(products)}
 
 TASK:
 CONTINUE = normal conversation
@@ -231,13 +231,18 @@ WORKFLOW:
 saying PURPOSE in introduction is a MUST.
 
 CALIBRATION:
-Give the available calibration reminder, including BOTH the date(s) AND
-the product(s) being calibrated.
+Give the calibration reminder, including BOTH the meter's serial number
+AND the date. The list above holds SERIAL NUMBERS of the customer's
+Tensitron meters (not product names).
 say - 'And I would just like to remind you that your calibration for
-[product] is due on [date] ...'
-If there are multiple products/dates, mention each product together with
-its corresponding date. If no products are on record, just give the
-date(s) as before.
+the Tensitron meter with serial number [serial number] is due on [date].'
+If there are several serial numbers, say 'the Tensitron meters with
+serial numbers [A], [B] and [C] are due on [date]'. If there are
+multiple dates, pair each serial number with its date. If no serial
+number is on record, just give the date(s): 'your Tensitron meter
+calibration is due on [date]'.
+Say the serial number exactly as given, character by character if it
+mixes digits and letters.
 Do not ask whether the date works or imply a new commitment.
 After giving the reminder, wait for the customer's response.
 Do not automatically end the call.

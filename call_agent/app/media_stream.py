@@ -1,4 +1,5 @@
 import json
+import re
 import base64
 import logging
 from typing import Dict, Any
@@ -232,7 +233,13 @@ class TwilioMediaStream:
 
         dates_list = []
         if calibration_dates:
-            dates_list = [d.strip() for d in calibration_dates.split(",") if d.strip()]
+            # Don't split "September 15, 2026" at its own comma: only split on
+            # commas that aren't followed by a 4-digit year.
+            dates_list = [
+                d.strip()
+                for d in re.split(r",(?!\s*\d{4})", calibration_dates)
+                if d.strip()
+            ]
 
         products_list = []
         if products:

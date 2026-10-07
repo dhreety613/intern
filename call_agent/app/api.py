@@ -337,7 +337,7 @@ def trigger_test_call(
     customer_name: str = "Dhreety",
     email: str = "dhreetysatapathy@gmail.com",
     calibration_dates: str = "September 15, 2026",
-    products: str = "Digital Caliper",
+    products: str = "365-HX",
 ):
     """Place a real outbound Twilio call for manual voice-flow testing.
 
