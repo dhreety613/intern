@@ -82,6 +82,14 @@ def decision_agent(
         ""
     )
 
+    # Customer corrections stored in Memory ALWAYS win over the original
+    # record, so Anne never reads back a detail the customer already
+    # replaced during this call. Falls back to the record when null.
+    memory = state.get("memory") or {}
+    customer_name = memory.get("new_name") or customer_name
+    email = memory.get("new_email") or email
+    phone_number = memory.get("new_phone_number") or phone_number
+
     calibration_dates = state.get(
         "calibration_dates",
         []
@@ -195,10 +203,20 @@ CUSTOMER:
 RECENT CONTEXT:
 {json.dumps(context)}
 
-CUSTOMER RECORD:
+CUSTOMER RECORD (CURRENT values - any corrections the customer made
+during this call are already applied here):
 Name: {customer_name}
 Email: {email}
 Phone: {phone_number}
+
+MEMORY (latest corrections the customer gave this call, null = none):
+New name: {json.dumps(memory.get("new_name"))}
+New email: {json.dumps(memory.get("new_email"))}
+New phone: {json.dumps(memory.get("new_phone_number"))}
+ALWAYS check MEMORY before stating or confirming the customer's name,
+email or phone. If a new value exists, use ONLY the new one and never
+the old one. If it is null, use the CUSTOMER RECORD value. If the CURRENT
+customer message itself gives a corrected detail, use that.
 Calibration dates: {json.dumps(calibration_dates)}
 Serial numbers of the Tensitron meters due for calibration: {json.dumps(products)}
 
