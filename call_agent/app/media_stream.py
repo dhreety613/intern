@@ -452,6 +452,7 @@ class TwilioMediaStream:
             response_text = "Sorry, I encountered an error. Could you please repeat that?"
             call_ended = False
             decision_task = "CONTINUE"
+            result = {}
 
         if self._voicemail:
             return
