@@ -21,7 +21,7 @@ MODEL = "gemini-3.5-flash-lite"
 # --------------------------------------------------------------
 # Placeholders — fill in with the real copy when available.
 # --------------------------------------------------------------
-GUARDRAIL_SUPPORT_EMAIL = "sales@tensitron.com"
+GUARDRAIL_SUPPORT_EMAIL = "service@tensitron.com"
 # Also the number the call gets redirected to when the caller asks for a
 # rep (see TwilioMediaStream._redirect_call_to_rep) - the real sales
 # line, used both as the spoken contact number and the live transfer
@@ -170,7 +170,7 @@ def decision_agent(
     # ========================================================
 
     prompt = f"""
-You are Anne from KTC Instruments.
+You are Anne from Tensitron.
 
 Respond naturally to the customer's CURRENT message.
 
@@ -227,7 +227,7 @@ WORKFLOW:
   Email: "Is [email] still your email address?"
   Phone: "Is [phone] still the best number to reach you?"
 - Do not invent additional contact questions.
-- FOR INTRODUCTION - introduce naturally as Anne from KTCInstruments, AND that you are calling to confirm their details and remind them of an upcoming calibration.
+- FOR INTRODUCTION - introduce naturally as Anne from Tensitron, AND that you are calling to confirm their details and remind them of an upcoming calibration.
 saying PURPOSE in introduction is a MUST.
 
 CALIBRATION:

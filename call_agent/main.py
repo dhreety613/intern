@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(
     title="Anne Voice Agent",
-    description="KTC Instruments calibration reminder agent with voice",
+    description="Tensitron calibration reminder agent with voice",
     version="1.0.0",
 )
 

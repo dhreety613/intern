@@ -213,8 +213,14 @@ class ElevenLabsTTS:
             raise ValueError("ELEVENLABS_API_KEY not set")
 
         self.voice_id = os.getenv("ELEVENLABS_VOICE_ID", voice_id)
-        self.model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2")
+        self.model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_flash_v2_5")
         self.output_format = os.getenv("ELEVENLABS_OUTPUT_FORMAT", "ulaw_8000")
+        # Lower stability = more natural variation; too low sounds erratic.
+        self.voice_settings = {
+            "stability": float(os.getenv("ELEVENLABS_STABILITY", "0.45")),
+            "similarity_boost": float(os.getenv("ELEVENLABS_SIMILARITY", "0.75")),
+            "style": float(os.getenv("ELEVENLABS_STYLE", "0")),
+        }
 
     async def text_to_speech_stream(
         self,
@@ -242,7 +248,11 @@ class ElevenLabsTTS:
             "xi-api-key": self.api_key,
             "content-type": "application/json",
         }
-        payload = {"text": text, "model_id": self.model_id}
+        payload = {
+            "text": text,
+            "model_id": self.model_id,
+            "voice_settings": self.voice_settings,
+        }
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:

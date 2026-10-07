@@ -63,7 +63,7 @@ def memory_agent(
     )
 
     prompt = f"""
-You are the memory extractor for a KTC Instruments call.
+You are the memory extractor for a Tensitron call.
 
 Merge the current customer message into previous memory.
 

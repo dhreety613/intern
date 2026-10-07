@@ -128,7 +128,7 @@ def brain_agent(
     recent_context = conversation[-5:]
 
     prompt = f"""
-You are the workflow Brain for Anne from KTC Instruments.
+You are the workflow Brain for Anne from Tensitron.
 
 You do NOT speak to the customer.
 Your ONLY job is to maintain permanent workflow progress.

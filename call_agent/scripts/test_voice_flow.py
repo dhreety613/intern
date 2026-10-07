@@ -5,7 +5,7 @@ This simulates the voice agent behavior WITHOUT actual audio/TTS/STT,
 just using the CallSession directly to test the conversation logic.
 
 Expected flow:
-1. Anne: "Hi, this is Anne from KTC Instruments..."
+1. Anne: "Hi, this is Anne from Tensitron..."
 2. Customer confirms/denies name
 3. If yes → confirm name → email → phone → calibration date reminder
 4. Wait for "nothing more" or similar

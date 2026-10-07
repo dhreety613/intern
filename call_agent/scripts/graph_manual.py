@@ -29,7 +29,7 @@ def main():
     # --------------------------------------------------------
 
     opening = (
-        "Hi, this is Anne from KTC Instruments. "
+        "Hi, this is Anne from Tensitron. "
         "Am I speaking with John Smith?"
     )
 

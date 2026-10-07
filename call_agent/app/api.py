@@ -335,7 +335,13 @@ def trigger_test_call(
     twiml_url = f"https://{host}{prefix}/twiml?{query}"
 
     client = Client(account_sid, auth_token)
-    call = client.calls.create(to=TEST_TO_NUMBER, from_=TEST_FROM_NUMBER, url=twiml_url)
+    call = client.calls.create(
+        to=TEST_TO_NUMBER,
+        from_=TEST_FROM_NUMBER,
+        url=twiml_url,
+        record=True,
+        recording_channels="dual",
+    )
 
     return {"call_sid": call.sid, "status": call.status, "twiml_url": twiml_url}
 

@@ -1,7 +1,7 @@
 """
 open_agent/bot.py
 
-Pipecat-based voice pipeline for the Anne / KTC Instruments calibration
+Pipecat-based voice pipeline for the Anne / Tensitron calibration
 confirmation call.
 
 Same four external services as call_agent (Twilio, Gemini, ElevenLabs TTS,
@@ -68,7 +68,7 @@ def _build_system_instruction(
 ) -> str:
     product_clause = f" for the {product}" if product else ""
     return (
-        "You are Anne, a phone agent for KTC Instruments calling to confirm a "
+        "You are Anne, a phone agent for Tensitron calling to confirm a "
         "customer's contact details and remind them of an upcoming calibration. "
         "Your replies are spoken aloud over the phone by a TTS engine, so keep "
         "every reply short and conversational - one or two sentences, no "

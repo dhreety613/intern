@@ -53,7 +53,7 @@ Loop until agent calls END_CALL
 
 Anne's full conversation flow (unchanged from local):
 
-1. **Anne opens:** "Hi, this is Anne from KTC Instruments calling to confirm your details registered with us. Am I speaking with [customer_name]?"
+1. **Anne opens:** "Hi, this is Anne from Tensitron calling to confirm your details registered with us. Am I speaking with [customer_name]?"
 
 2. **If customer confirms:** Anne confirms name → email → phone number → gives calibration reminder
 
