@@ -50,6 +50,16 @@ class DecisionOutput(BaseModel):
         )
     )
 
+    guidance_requested: bool = Field(
+        default=False,
+        description=(
+            "True when the caller asks for the calibration form "
+            "walkthrough/guidance (any wording, any point in the call). "
+            "The orchestrator then replaces the response with the "
+            "scripted walkthrough."
+        )
+    )
+
     redirect_reason: str = Field(
         default="",
         description=(

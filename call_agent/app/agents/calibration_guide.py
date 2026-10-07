@@ -95,55 +95,6 @@ _NEGATIVE_KEYWORDS = (
 )
 
 
-# Asking for the form walkthrough at ANY point in the call (even after
-# declining the offer, or before it was made) starts the scripted
-# walkthrough - Gemini must never improvise these steps.
-_GUIDANCE_REQUEST_KEYWORDS = (
-    "guidance",
-    "guide me",
-    "guide us",
-    "walk me through",
-    "walk through",
-    "how do i fill",
-    "how can i fill",
-    "how to fill",
-    "help me fill",
-    "help me with the form",
-    "help with the form",
-    "help me with the calibration form",
-    "fill out the form",
-    "fill out the calibration",
-    "fill the form",
-    "fill in the form",
-    "form guidance",
-    "step by step",
-    "step-by-step",
-    "instructions for the form",
-)
-
-_GUIDANCE_NEGATIONS = (
-    "don't need",
-    "dont need",
-    "do not need",
-    "no need",
-    "no guidance",
-    "not need",
-    "no thanks",
-    "no thank you",
-    "don't want",
-    "dont want",
-    "without",
-)
-
-
-def wants_guidance(text: str) -> bool:
-    """True if the customer is asking for the calibration form walkthrough."""
-    lowered = (text or "").lower()
-    if any(neg in lowered for neg in _GUIDANCE_NEGATIONS):
-        return False
-    return any(kw in lowered for kw in _GUIDANCE_REQUEST_KEYWORDS)
-
-
 def start_walkthrough() -> Dict[str, Any]:
     """Turn result for starting the walkthrough from step 1."""
     return {

@@ -3,7 +3,6 @@ from typing import Any, Dict, List
 from call_agent.app.agents.calibration_guide import (
     handle_guidance_turn,
     start_walkthrough,
-    wants_guidance,
 )
 from call_agent.app.agents.ivr_agent import looks_like_ivr
 from call_agent.app.agents.voicemail_agent import (
@@ -190,22 +189,12 @@ class CallSession:
         # deterministically (no Gemini) - see calibration_guide.py's
         # module docstring for why. The graph is only re-entered once
         # this sub-flow reports "done".
-        # Asking for guidance at any other time (after declining, before
-        # the offer, mid-call) also switches to the scripted walkthrough
-        # from step 1, instead of letting Gemini make the steps up.
-        guidance_requested = (
-            guidance_phase in ("none", "done") and wants_guidance(user_message)
-        )
-
-        if guidance_phase in ("offered", "walking") or guidance_requested:
-            if guidance_requested:
-                guidance_result = start_walkthrough()
-            else:
-                guidance_result = handle_guidance_turn(
-                    guidance_phase,
-                    self.state.get("guidance_step_idx", 0),
-                    user_message,
-                )
+        if guidance_phase in ("offered", "walking"):
+            guidance_result = handle_guidance_turn(
+                guidance_phase,
+                self.state.get("guidance_step_idx", 0),
+                user_message,
+            )
 
             self.state["guidance_phase"] = guidance_result["phase"]
             self.state["guidance_step_idx"] = guidance_result["step_idx"]
@@ -259,6 +248,26 @@ class CallSession:
             {}
         )
 
+        # The Decision agent flagged a request for form guidance (like it
+        # flags END_CALL): the orchestrator drops Gemini's reply and
+        # switches to the scripted walkthrough from step 1.
+        guidance_switched = False
+        if decision.get("guidance_requested") and guidance_phase != "walking":
+            walk = start_walkthrough()
+            decision = {
+                **decision,
+                "response": walk["response"],
+                "present_task": walk["present_task"],
+                "redirect_to_rep": False,
+                "redirect_reason": "",
+            }
+            result = {**result, "decision": decision, "call_ended": False}
+            self.state["decision"] = decision
+            self.state["call_ended"] = False
+            self.state["guidance_phase"] = walk["phase"]
+            self.state["guidance_step_idx"] = walk["step_idx"]
+            guidance_switched = True
+
         response = decision.get(
             "response",
             ""
@@ -277,7 +286,8 @@ class CallSession:
         # GUIDANCE PHASE still "none" going in) - from the next customer
         # reply onward, the deterministic branch above takes over.
         if (
-            guidance_phase == "none"
+            not guidance_switched
+            and guidance_phase == "none"
             and self.state.get("progress", {}).get("calibration_completed")
         ):
             self.state["guidance_phase"] = "offered"

@@ -310,6 +310,17 @@ pricing, support, a complaint, literally anything).
 - If they say no, set redirect_to_rep to FALSE, acknowledge, and resume
   the workflow from wherever it left off.
 
+FORM GUIDANCE REQUESTS:
+If the customer asks - at ANY point in the call, in ANY wording, even
+after earlier declining - for help/guidance/a walkthrough on how to fill
+out or submit the calibration form, set guidance_requested to TRUE and
+reply with just "Sure, I can walk you through it." The system then
+replaces your reply with the official scripted walkthrough.
+NEVER describe form steps, the website, pricing or any instructions
+yourself - you do not know them. A question about price is NOT a guidance
+request (use the guardrail for that).
+If they decline guidance or do not ask for it, guidance_requested is FALSE.
+
 DIVERSION:
 Briefly redirect off-topic conversation to the call purpose.
 After ~3 consecutive diversions, redirect firmly.
@@ -336,6 +347,7 @@ Return ONLY JSON:
   "topic_diversion": false,
   "random_conversation": false,
   "redirect_to_rep": false,
+  "guidance_requested": false,
   "redirect_reason": ""
 }}
 """
