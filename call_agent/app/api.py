@@ -344,6 +344,8 @@ def trigger_test_call(
     email: str = "dhreetysatapathy@gmail.com",
     calibration_dates: str = "September 15, 2026",
     products: str = "365-HX",
+    deal_id: str = "",
+    person_id: str = "",
 ):
     """Place a real outbound Twilio call for manual voice-flow testing.
 
@@ -375,6 +377,8 @@ def trigger_test_call(
             ("phone_number", TEST_TO_NUMBER),
             ("calibration_dates", calibration_dates),
             ("products", products),
+            ("deal_id", deal_id),
+            ("person_id", person_id),
         )
     )
     twiml_url = f"https://{host}{prefix}/twiml?{query}"
@@ -392,6 +396,14 @@ def trigger_test_call(
         async_amd=True,
         async_amd_status_callback=amd_url,
         async_amd_status_callback_method="POST",
+    )
+
+    # Greppable in Render logs; the media stream's TRACK lines for this call
+    # carry the same call_sid/deal_id.
+    logger.info(
+        f"TRACK | TEST_CALL_PLACED | call={call.sid} deal={deal_id or '-'} "
+        f"person={person_id or '-'} | customer={customer_name!r} "
+        f"products={products!r} dates={calibration_dates!r} to={TEST_TO_NUMBER}"
     )
 
     return {"call_sid": call.sid, "status": call.status, "twiml_url": twiml_url}

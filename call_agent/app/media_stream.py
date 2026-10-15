@@ -94,6 +94,11 @@ class TwilioMediaStream:
         self._deal_id = ""
         self._result_sent = False
 
+        # Per-call tracking (see _track). Every "TRACK |" line in the Render
+        # logs carries call/deal/person so one call can be grepped end to end.
+        self._transcript = []
+        self._started_at = None
+
         # Speech services
         self.stt = get_stt_engine(os.getenv("STT_ENGINE", "elevenlabs"))
         self.tts = get_tts_engine("elevenlabs")
@@ -171,6 +176,19 @@ class TwilioMediaStream:
     MAX_SILENCE_ONLY_MS = 4000  # drop the buffer if nothing but noise for this long
     BARGE_IN_VOICED_MS = 200  # sustained voice while Anne is speaking = interruption
 
+    def _track(self, event: str, **fields):
+        """Greppable per-call log line: `TRACK | EVENT | call=.. deal=.. person=.. | k=v`."""
+        extra = " ".join(f"{k}={v!r}" for k, v in fields.items())
+        logger.info(
+            f"TRACK | {event} | call={self.call_sid} deal={self._deal_id or '-'} "
+            f"person={self._person_id or '-'} | {extra}"
+        )
+
+    def _say(self, role: str, text: str):
+        """Log one conversation turn and keep it for the end-of-call summary."""
+        self._transcript.append(f"{role}: {text}")
+        self._track("TURN", speaker=role, text=text)
+
     async def handle(self):
         """
         Main WebSocket message loop.
@@ -202,6 +220,7 @@ class TwilioMediaStream:
         finally:
             self._call_ended = True
             self._cancel_wait_timeout()
+            self._track_end()
             if self._voicemail_key_task:
                 self._voicemail_key_task.cancel()
             await self._send_call_result()
@@ -263,6 +282,16 @@ class TwilioMediaStream:
         logger.info(
             f"Stream started: sid={self.stream_sid} call={self.call_sid} "
             f"customer={customer_name!r} (source={'customParameters' if custom_params.get('customer_name') else 'query-string-fallback'})"
+        )
+
+        self._started_at = datetime.now()
+        self._track(
+            "CALL_START",
+            customer=customer_name,
+            phone=phone_number,
+            products=products_list,
+            dates=dates_list,
+            answered_by=self._answered_by,
         )
 
         # Send Anne's opening greeting. Keep a reference so the task isn't
@@ -405,6 +434,7 @@ class TwilioMediaStream:
             ):
                 last = text
                 logger.info(f"Customer: {last}")
+                self._say("Customer", last)
             return last
 
         transcript = None
@@ -473,6 +503,8 @@ class TwilioMediaStream:
 
         logger.info(f"Anne: {response_text}")
         logger.info(f"Decision Task: {decision_task}")
+        self._say("Anne", response_text)
+        self._track("DECISION", task=decision_task, call_ended=call_ended)
 
         # Store the decision task for timeout tracking
         self.last_agent_task = decision_task
@@ -560,6 +592,8 @@ class TwilioMediaStream:
 
         logger.info(f"Anne (late): {response_text}")
         logger.info(f"Decision Task (late): {decision_task}")
+        self._say("Anne", response_text)
+        self._track("DECISION", task=decision_task, call_ended=call_ended, late=True)
         self.last_agent_task = decision_task
 
         if response_text:
@@ -628,6 +662,8 @@ class TwilioMediaStream:
                 call_ended = True
 
             logger.info(f"Timeout Response: {response_text}")
+            self._track("WAIT_TIMEOUT", seconds=self.wait_timeout_seconds)
+            self._say("Anne", response_text)
 
             # Send final response
             if response_text:
@@ -648,6 +684,7 @@ class TwilioMediaStream:
         logger.info(
             f"Anne (greeting): {greeting} (answered_by={self._answered_by!r})"
         )
+        self._say("Anne", greeting)
         await self._stream_tts_to_twilio(greeting)
 
         # Voicemail: the fixed message is the whole call - hang up.
@@ -687,6 +724,25 @@ class TwilioMediaStream:
             await self.handle_voicemail(force=True)
         except asyncio.CancelledError:
             pass
+
+    def _track_end(self):
+        """One-line end-of-call summary with the full transcript."""
+        if self._started_at is None:
+            return
+        state = self.session.state if self.session else {}
+        memory = state.get("memory") or {}
+        self._track(
+            "CALL_END",
+            duration_s=int((datetime.now() - self._started_at).total_seconds()),
+            turns=len(self._transcript),
+            human=bool(state.get("human_confirmed")),
+            voicemail=bool(state.get("is_voicemail")) or self._voicemail,
+            stage=state.get("current_stage"),
+            guidance=state.get("guidance_phase"),
+            wrong_number=bool(memory.get("wrong_number_so_avoid")),
+            do_not_call=bool(memory.get("do_not_call")),
+            transcript=" || ".join(self._transcript),
+        )
 
     async def _send_call_result(self):
         """Once per call, when the stream ends: report the outcome."""
@@ -883,6 +939,8 @@ class TwilioMediaStream:
         if not self.call_sid:
             logger.error("Cannot redirect to rep - no call_sid for this call")
             return
+
+        self._track("REDIRECT_TO_REP", reason=reason)
 
         account_sid = os.getenv("TWILIO_ACCOUNT_SID")
         auth_token = os.getenv("TWILIO_AUTH_TOKEN")
