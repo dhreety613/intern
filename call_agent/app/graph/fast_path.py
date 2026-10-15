@@ -55,6 +55,33 @@ _STAGE_FLAG = {
 }
 
 
+# Short replies made ONLY of these words count as a plain confirmation
+# ("yeah you are", "mhm it is", "okay thank you for the reminder"). Any word
+# outside this list ("not", "but", "could", "email", "different"...) sends
+# the turn to the full Brain, so negatives, questions and corrections never
+# take the fast path.
+_CORE = {
+    "yes", "yeah", "yep", "yup", "sure", "correct", "right", "absolutely",
+    "definitely", "exactly", "indeed", "speaking", "mhm", "mm", "hmm", "uh", "huh",
+}
+_FILLER = {
+    "it", "is", "you", "are", "that", "thats", "this", "i", "am", "he", "she",
+    "me", "my", "so", "please", "still", "the", "for", "thank", "thanks",
+    "reminder", "okay", "ok", "alright", "great", "see", "got", "noted", "oh",
+    "ah", "well", "um", "uhm", "very", "much", "yes", "correct",
+}
+_MAX_WORDS = 6
+
+
+def _vocab_only(text: str, need_core: bool) -> bool:
+    words = text.split()
+    if not words or len(words) > _MAX_WORDS:
+        return False
+    if not all(w in _CORE or w in _FILLER for w in words):
+        return False
+    return (not need_core) or any(w in _CORE for w in words)
+
+
 def _normalize(text: str) -> str:
     text = re.sub(r"[^a-z' ]", " ", (text or "").lower()).replace("'", "")
     return re.sub(r"\s+", " ", text).strip()
@@ -77,11 +104,21 @@ def fast_brain_update(state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if stage not in _STAGE_FLAG:
         return None  # workflow already complete: nothing for Brain to do
 
-    text = _normalize(state.get("user_message", ""))
+    raw = state.get("user_message", "") or ""
+    text = _normalize(raw)
+    # ORIGINAL exact-phrase matching (kept for revert):
+    # if stage == "calibration":
+    #     ok = text in _AFFIRM or text in _SOFT_YES or text in _ACK
+    # else:
+    #     ok = text in _AFFIRM or text in _SOFT_YES
     if stage == "calibration":
-        ok = text in _AFFIRM or text in _SOFT_YES or text in _ACK
+        ok = text in _AFFIRM or text in _SOFT_YES or text in _ACK or _vocab_only(text, need_core=False)
     else:
-        ok = text in _AFFIRM or text in _SOFT_YES
+        ok = text in _AFFIRM or text in _SOFT_YES or _vocab_only(text, need_core=True)
+    # Non-English script in the transcript (e.g. a Hindi/Tamil word): not
+    # sure what was said, so use the full Brain.
+    if raw.isascii() is False:
+        ok = False
     if not ok:
         return None
 

@@ -336,3 +336,15 @@ New, inactive, manual:
                     call_db table only (via the active "anne - Andrew live call" workflow's receiver at
                     path anne-call-result, which owns that webhook URL) - NEVER touches the Pipedrive card.
 Test picks used: Nick Wolles deal 43724, person 19248 (phone 6056684150, serial 536-XD, due 2026-10-19).
+
+4b) FAST PATH WIDENED (same day, after live test call CAa29a0f57...)
+--------------------------------------------------------------------
+Live result: only 1 of 6 LLM turns hit the exact-phrase fast path ("Yes, it is":
+agent 834ms vs ~2500ms). Misses: "Yeah, you are", "Mhm, it is", "ok thank you for the reminder".
+Fix in app/graph/fast_path.py: besides the exact phrases, a reply of <=6 words made
+ONLY of confirm/filler words (_CORE/_FILLER lists; contact stages need >=1 _CORE word like
+yes/yeah/mhm/correct) now qualifies. Any other word ("not","but","could","email",
+"different"...) or any non-ASCII text -> full Brain (so "no", questions, corrections and
+transcripts with Hindi/Tamil words never fast-path). The old exact-match block is kept as
+a comment inside fast_brain_update(). Local table test: 12/12 cases as expected.
+Kill switch unchanged: ANNE_FAST_PATH=0 on Render.
