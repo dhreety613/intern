@@ -1,9 +1,11 @@
+import logging
 from typing import Dict, Any
 
 from langgraph.graph import StateGraph, START, END
 
 from call_agent.app.graph.state import CallState
 from call_agent.app.graph.context import get_recent_context
+from call_agent.app.graph.fast_path import fast_brain_update
 
 from call_agent.app.agents.memory_agent import memory_agent
 from call_agent.app.agents.brain_agent import brain_agent
@@ -14,6 +16,9 @@ from call_agent.app.agents.voicemail_agent import (
     is_machine_answer,
     voicemail_agent,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -58,6 +63,42 @@ def run_brain(
         "brain_output": brain_output,
         "progress": progress,
         "current_stage": current_stage,
+        "context": context,
+    }
+
+
+# ============================================================
+# BRAIN FAST NODE (latency): trivial confirming turns skip the Brain
+# and Memory Gemini calls entirely - see graph/fast_path.py.
+# ============================================================
+
+def run_brain_fast(
+    state: CallState,
+) -> Dict[str, Any]:
+
+    fast = fast_brain_update(state)
+
+    if fast is None:
+        # Should not happen (the router just checked), but never fail a turn.
+        return run_brain(state)
+
+    logger.info(
+        f"TRACK | FAST_PATH | stage={fast['stage_confirmed']} | "
+        "Brain+Memory LLM calls skipped"
+    )
+
+    context = get_recent_context(
+        state.get("conversation", []),
+        limit=5,
+    )
+
+    return {
+        "brain_output": {
+            "progress": fast["progress"],
+            "current_stage": fast["current_stage"],
+        },
+        "progress": fast["progress"],
+        "current_stage": fast["current_stage"],
         "context": context,
     }
 
@@ -165,6 +206,15 @@ def route_after_ivr_check(
     if result.get("is_ivr") or result.get("action") == "restart":
         return ["ivr_respond"]
 
+    # ORIGINAL (before the 2026-10-15 latency fast path) - revert by
+    # restoring this line and deleting the block below:
+    # return ["memory", "brain"]
+
+    # Trivial confirming turn ("yes", "uh-huh", ...): Brain is predictable
+    # and Memory has nothing to extract, so skip both LLM calls.
+    if fast_brain_update(state) is not None:
+        return ["brain_fast"]
+
     return ["memory", "brain"]
 
 
@@ -186,6 +236,11 @@ def build_graph():
     graph.add_node(
         "brain",
         run_brain
+    )
+
+    graph.add_node(
+        "brain_fast",
+        run_brain_fast
     )
 
     graph.add_node(
@@ -227,7 +282,8 @@ def build_graph():
     graph.add_conditional_edges(
         "ivr_check",
         route_after_ivr_check,
-        ["memory", "brain", "ivr_respond", "voicemail_agent"],
+        # ORIGINAL: ["memory", "brain", "ivr_respond", "voicemail_agent"]
+        ["memory", "brain", "brain_fast", "ivr_respond", "voicemail_agent"],
     )
 
     graph.add_node(
@@ -247,6 +303,11 @@ def build_graph():
 
     graph.add_edge(
         "brain",
+        "decision"
+    )
+
+    graph.add_edge(
+        "brain_fast",
         "decision"
     )
 

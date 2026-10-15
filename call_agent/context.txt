@@ -1,0 +1,240 @@
+CALL_AGENT - CONTEXT FOR NEXT SESSION
+(last updated 2026-10-05)
+
+WHAT THIS IS
+------------
+"Anne" - a voice agent for KTC Instruments that calls customers to:
+  1. confirm name / email / phone
+  2. remind them of an upcoming calibration (date + product)
+  3. offer + walk through guidance on filling the calibration form
+     (deterministic script, see below - NOT Gemini for this part)
+  4. ask if there's anything else, then end the call
+
+This is the MAIN / production workflow. There is a second, separate
+pipeline at open_agent/ (Pipecat-based) - that one does NOT use this
+LangGraph brain, is experimental, and is not what we've been testing
+or tweaking. Don't confuse the two.
+
+ARCHITECTURE (call_agent/)
+---------------------------
+app/api.py            - FastAPI router, mounted at prefix "/call-agent"
+                         in main.py (the actual deployed entrypoint,
+                         `uvicorn main:app`). Has: /health, /twiml
+                         (Twilio TwiML), /media (WebSocket, real voice
+                         calls), /test-call (places a real outbound
+                         Twilio call for manual testing), /redirect-
+                         twiml + /redirect-whisper (live-call transfer
+                         to a rep), /start /message /session (text-only
+                         API path, mostly for manual testing), /v1/chat/
+                         completions (ElevenLabs-compatible adapter,
+                         not the active path for real calls).
+
+app/media_stream.py   - TwilioMediaStream: the real-time voice loop.
+                         STT (ElevenLabs) -> CallSession.process() ->
+                         TTS (ElevenLabs), streamed over the Twilio
+                         Media Streams WebSocket. Has VAD-based turn
+                         detection, barge-in, a 90s WAIT-timeout, and
+                         _redirect_call_to_rep() for live call transfer.
+                         UNCHANGED by the 2026-10-05 architecture
+                         change below - CallSession.process()'s return
+                         shape stayed identical on purpose.
+
+app/call.py           - CallSession: holds per-call state dict, adds
+                         messages to conversation. process() now
+                         BRANCHES: if state["guidance_phase"] is
+                         "offered" or "walking", hands the turn to
+                         calibration_guide.handle_guidance_turn()
+                         (pure Python, NO Gemini call) instead of the
+                         LangGraph. Otherwise runs call_graph.invoke()
+                         as before, and flips guidance_phase to
+                         "offered" right after a turn where Brain just
+                         set calibration_completed=True (i.e. right
+                         after decision_agent asks the offer question).
+
+app/agents/calibration_guide.py  - NEW (2026-10-05). Deterministic,
+                         no-LLM: the calibration-guidance offer's
+                         yes/no answer AND the 9-step walkthrough text
+                         itself. Why no Gemini here: the walkthrough
+                         reads a URL (tensitron.com), click targets, and
+                         a phone number - an LLM paraphrasing any of
+                         that risks garbling it. Keyword matching only:
+                         _is_affirmative/_is_negative (offer answer),
+                         _wants_repeat (repeat current step instead of
+                         advancing). TIMEOUT_SENTINEL ("[No response
+                         received - timeout]", the same string
+                         media_stream.py's 90s WAIT-timeout handler
+                         already sends) is special-cased to re-ask/
+                         repeat rather than silently advance on silence.
+                         GUIDE_STEPS/GUIDE_INTRO/GUIDE_CLOSING are the
+                         REAL script now (not placeholders) - given by
+                         the user 2026-10-05, closing line trimmed to
+                         drop its own goodbye (the real goodbye comes
+                         from the normal end-of-call flow right after,
+                         to avoid saying goodbye twice).
+
+app/graph/graph.py    - LangGraph: memory_agent (runs in parallel) ->
+                         brain_agent -> decision_agent -> finalize.
+                         Brain decides permanent workflow progress;
+                         Decision decides what Anne actually says and
+                         whether to end/wait/redirect; Memory extracts
+                         facts (corrections, flags) into state["memory"].
+                         Unchanged structurally by the 10-05 change -
+                         Brain's workflow is just shorter now (see next).
+
+app/agents/brain_agent.py     - REVERTED 2026-10-05 to its simpler
+                         5-stage version: name -> email -> phone ->
+                         calibration -> complete. No longer tracks
+                         calibration_guidance_offered/wanted/step at
+                         all - that whole concept moved to
+                         calibration_guide.py + call.py's guidance_phase
+                         (deterministic, outside Brain/Gemini entirely).
+                         get_next_stage() stops at "complete" the
+                         instant calibration_completed=True.
+
+app/agents/decision_agent.py  - The big prompt. Decides response text
+                         + present_task (CONTINUE/WAIT/CLARIFY/
+                         END_CALL) + redirect_to_rep/redirect_reason.
+                         Also holds:
+                           GUARDRAIL_SUPPORT_EMAIL = sales@tensitron.com
+                           GUARDRAIL_SUPPORT_PHONE = +17022301616
+                             (real number now, not a placeholder - used
+                             BOTH as the spoken contact number AND as
+                             the live transfer target)
+                         CALIBRATION_FORM_GUIDE_STEPS no longer lives
+                         here - moved to calibration_guide.py (it's not
+                         Gemini-driven anymore, so it doesn't belong in
+                         the Gemini prompt file). decision_agent's job
+                         re: guidance is now just ONE thing: the moment
+                         CURRENT STAGE is "complete" AND (a new prompt
+                         input) GUIDANCE PHASE is "none", say the offer
+                         question verbatim and set present_task=WAIT.
+                         It will never see "offered"/"walking" turns -
+                         those bypass this prompt entirely via call.py.
+                         AFTER WORKFLOW ("is there anything else?") is
+                         now gated on GUIDANCE PHASE=="done", not just
+                         CURRENT STAGE=="complete" (since "complete"
+                         triggers immediately after the calibration
+                         reminder is acknowledged, BEFORE the guidance
+                         offer/walkthrough has happened).
+
+app/schemas/brain.py   - REVERTED to original 4 fields (name_confirmed,
+                         email_confirmed, phone_confirmed,
+                         calibration_completed) - the 3 guidance fields
+                         added earlier this week were removed along
+                         with the brain-side guidance tracking above.
+
+app/graph/state.py     - CallState TypedDict gained guidance_phase (str)
+                         and guidance_step_idx (int) fields (type hints
+                         only, not enforced at runtime - LangGraph
+                         doesn't care, but good documentation).
+
+WORKFLOW STAGES (brain_agent.get_next_stage) - SIMPLIFIED 2026-10-05
+---------------------------------------------------------------------
+name_confirmation -> email_confirmation -> phone_confirmation ->
+calibration -> complete
+
+Brain's job ends there. What happens next (calibration guidance offer
++ walkthrough) is tracked separately via session.state["guidance_phase"]
+in call.py, cycling: "none" -> "offered" -> "walking" -> "done". Once
+"done", the normal Gemini graph resumes (decision_agent sees GUIDANCE
+PHASE="done" and asks "anything else?").
+
+CALIBRATION GUIDANCE FLOW (as of 2026-10-05, this is the CURRENT real
+script - not a placeholder)
+---------------------------------------------------------------------
+1. Gemini (decision_agent) gives the calibration reminder, customer
+   acknowledges -> Brain sets calibration_completed=True.
+2. SAME turn: decision_agent's CALIBRATION GUIDANCE OFFER section fires
+   (CURRENT STAGE=="complete", GUIDANCE PHASE=="none"): asks verbatim
+   "Would you like some guidance on how to fill out the calibration
+   form?", present_task=WAIT. call.py then flips guidance_phase to
+   "offered" for the next turn.
+3. Customer's yes/no answer -> handled by calibration_guide.py, NOT
+   Gemini:
+   - yes -> phase="walking", step_idx=0, says GUIDE_INTRO + step 0,
+     present_task=WAIT.
+   - no -> phase="done", says DECLINE_ACK ("No problem! Is there
+     anything else I can help you with today?"), present_task=CONTINUE
+     (next turn resumes the normal Gemini graph, which sees this
+     exchange in RECENT CONTEXT and responds to whatever the customer
+     says in reply to that "anything else").
+   - ambiguous -> re-asks the offer question, phase stays "offered".
+4. While phase=="walking": each customer turn either repeats the
+   CURRENT step verbatim (if they ask to repeat, OR on a WAIT-timeout)
+   or advances to the next of the 9 GUIDE_STEPS. After the last step is
+   confirmed, speaks GUIDE_CLOSING (the real contact info line, goodbye
+   trimmed off) and sets phase="done", present_task=CONTINUE - same
+   handoff back to the normal graph as the decline path.
+5. From here it's the EXISTING "anything else?" / END_CALL flow,
+   unchanged.
+
+Tested 2026-10-05 (pure Python, no Gemini needed for this part - see
+below for why real Gemini calls can't be tested locally right now):
+- Full offer->yes->all 9 steps->closing sequence, including a mid-walk
+  "can you repeat that?" - passed, exact step text matched at each
+  index.
+- Decline path, ambiguous-answer-to-offer (re-asks), and the
+  TIMEOUT_SENTINEL case in both "offered" and "walking" phases (re-asks/
+  repeats rather than silently advancing on silence) - all passed.
+- CallSession.process()'s branching itself, by manually setting
+  state["guidance_phase"]="offered" and calling .process("yes please")
+  - confirmed it returns the right response/present_task/phase
+    transition WITHOUT making any Gemini call, and that the SAME
+    dict shape media_stream.py already expects
+    (response/decision.present_task/decision.redirect_to_rep/
+    decision.redirect_reason/call_ended) comes back unchanged - so
+    media_stream.py needed ZERO edits for any of this.
+
+NOT YET TESTED: a real live call exercising this end-to-end (name/
+email/phone/calibration all need real Gemini, which is unavailable
+locally - see ENV VARS section). Next session (or a live test call via
+Render) should confirm: the offer question actually gets asked right
+after the calibration reminder is acknowledged, and the full 9-step
+walkthrough reads correctly over real TTS.
+
+DEPLOYMENT
+----------
+Render service: https://fetch-history-e22w.onrender.com
+  /call-agent/*  -> this app (prefix set in main.py)
+  /open-agent/*  -> the separate Pipecat pipeline (not used for real
+                    calls currently)
+Auto-deploys on push to main (confirm this is still true if something
+seems stale).
+Trigger a real test call:
+  curl -X POST https://fetch-history-e22w.onrender.com/call-agent/test-call
+  (defaults: customer_name=Dhreety, phone is hardcoded to
+  +919040239072 - the TEST_TO_NUMBER constant in api.py, a SEPARATE
+  constant from GUARDRAIL_SUPPORT_PHONE, used only to dial the user's
+  own phone for manual testing - so this can't be used to dial
+  arbitrary numbers)
+
+ENV VARS NEEDED (set on Render, NOT present in this local shell)
+------------------------------------------------------------------
+GEMINI_API_KEY, ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID (optional),
+TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN.
+Local dev shell has GEMINI_API_KEY and GOOGLE_API_KEY set but BOTH are
+INVALID (confirmed again 2026-10-05 via a live call to the Gemini API -
+"API key not valid") and there are no Twilio creds at all locally - so
+nothing involving a real Gemini/Twilio call can be tested from this
+machine directly; only syntax/import checks, pure-Python logic (like
+calibration_guide.py's state machine), and state-wiring tests (like
+manually forcing guidance_phase and calling CallSession.process()) can
+be verified locally. Real end-to-end testing = trigger a call against
+the Render deployment above.
+
+OPEN ITEMS / PLACEHOLDERS TO REVISIT
+---------------------------------------
+- Confirm the new calibration-guidance flow (offer -> 9-step walkthrough
+  -> closing -> anything else -> end) holds up on a real live test call
+  - pushed but not yet verified live as of this writing.
+- GUARDRAIL_SUPPORT_PHONE / GUIDE_CLOSING's spoken number are both
+  +17022301616 (702-230-1616) now - real number, confirmed by the user
+  2026-10-05. If it ever needs to change again, it lives in TWO places:
+  decision_agent.py's GUARDRAIL_SUPPORT_PHONE constant, and
+  calibration_guide.py's GUIDE_CLOSING string (the digits are spelled
+  out there for TTS pacing, not just inserted as a variable - keep them
+  in sync by hand if this number changes again).
+- topic_diversion_count / random_conversation_count in call_progress
+  are read by decision_agent.py but are never actually incremented
+  anywhere in the graph (pre-existing gap, not touched - flagged here
+  in case it ever needs fixing).
