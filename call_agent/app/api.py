@@ -269,7 +269,13 @@ async def amd_callback(request: Request):
 
     stream = ACTIVE_STREAMS.get(call_sid)
     if stream and is_machine_answer(answered_by):
-        asyncio.create_task(stream.handle_voicemail())
+        # ORIGINAL: asyncio.create_task(stream.handle_voicemail())
+        # machine_end_beep = Twilio heard the voicemail beep, so it is a
+        # recording box even if its greeting said "press pound" (which made
+        # the IVR check swallow the verdict on the Martin call, 2026-10-15).
+        asyncio.create_task(
+            stream.handle_voicemail(force=answered_by == "machine_end_beep")
+        )
 
     return Response(status_code=204)
 

@@ -362,3 +362,11 @@ Added TRACK events in app/media_stream.py (logging only, no behaviour change):
   transcript as "Anne (voicemail message)". REDIRECT_TO_REP already existed.
 Per-customer results are kept in pipedrive_audit/anne_test_report.txt (update after each test).
 Revert: git revert of this commit (logging only).
+
+2026-10-16 FIX: voicemail swallowed by IVR check (Martin Saucedo, deal 43723, call CA98f46e...)
+  His voicemail greeting said "...press the pound key for more options"; the IVR check
+  marked the call as a menu, so when Twilio AMD said machine_end_beep the stream ignored it
+  (VOICEMAIL_IGNORED) and Anne stayed silent on the line, never leaving the message.
+  Fix (app/api.py /amd-callback): answered_by == "machine_end_beep" now calls
+  handle_voicemail(force=True), which skips the IVR guard. Original line kept as a comment.
+  Revert: restore the commented line.
