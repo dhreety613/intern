@@ -375,3 +375,15 @@ Revert: git revert of this commit (logging only).
   app/media_stream.py handle_voicemail: the "IVR seen -> ignore AMD machine verdict" guard now also requires
   that Anne pressed at least one key (ivr["presses"]). A greeting with "press pound" and no presses = voicemail.
   Original guard kept as a comment above the new condition.
+
+2026-10-16 SUMMARY of customer test calls so far (details: pipedrive_audit/anne_test_report.txt)
+  1) Nick Wolles, deal 43724 - CAdd24a1... - voicemail, 21 s, message left (~11 s). Result webhook 404:
+     n8n receiver workflow was inactive (re-activated). Nick is still in the queue.
+  2) Martin Saucedo, deal 43723 - CA98f46e... - voicemail whose greeting said "press pound": IVR check swallowed
+     Twilio's machine verdict, Anne stayed silent ~5 min until the server restart. No message left. (FIX 1)
+  3) Martin Saucedo again - CAb4a9258... - same bug (AMD verdict was not machine_end_beep). Fixed with FIX 2
+     (commit 5d864c7). Not yet re-verified on a live call.
+Queue: n8n "anne - queue (20) preview" (Limit node = 100) returned 100 people on 2026-10-15; 39 are US with a due date.
+New log events: VOICEMAIL_DETECTED / _LEFT / _IGNORED / _KEY_TIMEOUT, IVR_PRESS (see 2026-10-16 changelog).
+Open: /hangup secret not available to Claude (needed to cut a stuck call without restarting the server);
+  voice change (ELEVENLABS_VOICE_ID) still waiting on a voice choice.
