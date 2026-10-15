@@ -1,5 +1,5 @@
 CALL_AGENT - CONTEXT FOR NEXT SESSION
-(last updated 2026-10-05)
+(last updated 2026-10-15 - see CHANGELOG 2026-10-15 at the bottom)
 
 WHAT THIS IS
 ------------
@@ -238,3 +238,101 @@ OPEN ITEMS / PLACEHOLDERS TO REVISIT
   are read by decision_agent.py but are never actually incremented
   anywhere in the graph (pre-existing gap, not touched - flagged here
   in case it ever needs fixing).
+
+
+================================================================
+CHANGELOG 2026-10-15  (test-call tracking, latency work, n8n)
+================================================================
+
+REVERT POINTS (read this first if something broke)
+--------------------------------------------------
+- FULL SNAPSHOT of the agent BEFORE the structural latency change:
+    C:\Users\armyt\desktop\pipedrive_audit\anne_copy\call_agent
+  (plain copy, no .git; = git commit f80d773 + the older context.txt).
+  To go back: replace two/call_agent with anne_copy/call_agent and push.
+- Git commits on main of github.com/dhreety613/intern (in order):
+    a417849  TRACK log lines + scripts/render_logs.py + /test-call deal_id/person_id
+    19e41d8  /hangup kill-switch endpoint
+    c6e3572  LATENCY log lines (stt / agent / tts_first_byte)
+    f80d773  trimmed decision/brain/memory prompts   <- anne_copy snapshot == this
+    4d99b0d  structural latency "fast path" (see section 4)
+  Revert one step:  git revert <commit>   (or git checkout f80d773 -- call_agent)
+- Instant switch-off of the fast path WITHOUT a deploy: set env
+  ANNE_FAST_PATH=0 on the Render service (fetch_history).
+
+1) CALL TRACKING (render logs)
+------------------------------
+Every call writes greppable lines:  "TRACK | EVENT | call=<sid> deal=<id> person=<id> | ..."
+Events: TEST_CALL_PLACED (api.py /test-call), CALL_START, TURN (speaker+text),
+DECISION, WAIT_TIMEOUT, REDIRECT_TO_REP, HANGUP_REQUESTED, FAST_PATH,
+LATENCY (stage=stt|agent|tts_first_byte, ms), CALL_END (duration, human,
+voicemail, stage, guidance, flags, FULL TRANSCRIPT in one line).
+Pull them:  RENDER_API_KEY=... python -m call_agent.scripts.render_logs --call CA... | --deal 43724 | --hours 2
+(Render owner tea-d3co33ali9vc73dol5u0, service fetch_history srv-d8nvgvog4nts73bmb8i0).
+In app/media_stream.py: _track(), _say(), _track_end() + calls in
+_handle_start / _process_audio_buffer / _stream_tts_to_twilio etc.
+/test-call now accepts deal_id and person_id. It still ONLY dials the hardcoded
+test number +919040239072 (use it to hear Anne with a real customer's data).
+
+2) KILL SWITCH
+--------------
+POST /call-agent/hangup[?call_sid=CA...]   header X-Webhook-Secret = CALL_RESULT_WEBHOOK_SECRET
+(no call_sid = hang up every call this server is streaming). Uses Render's
+Twilio env creds. Logs TRACK | HANGUP_REQUESTED.
+
+3) PROMPT TRIM (f80d773)
+------------------------
+decision_agent.py 8816->5985 chars, brain_agent.py 2281->1494, memory_agent.py 2549->2039.
+Same rules/scripted lines/JSON schema, less wording. ORIGINAL prompts are kept
+as "# ---- ORIGINAL ... PROMPT ----" comment blocks right above each new prompt
+(delete the new one + uncomment the old one to revert). Measured effect on
+Gemini time: ~none (2.4s -> 2.5s) - the cost is the chained calls, not prompt size.
+
+4) STRUCTURAL LATENCY CHANGE: "fast path" (4d99b0d)
+---------------------------------------------------
+Problem: a customer turn = ivr_check (no LLM unless it sounds like a menu) ->
+[Memory || Brain] -> Decision. ~2.5s of Gemini per turn.
+Change: new file app/graph/fast_path.py + graph.py edits. On a trivial
+confirming reply (exact-match yes/yeah/correct/"that's right"/"speaking"/
+uh-huh... for name/email/phone, plus okay/I see/thanks... for the calibration
+reminder) AND only if Anne's last message actually asked about that stage
+(cue words), the graph routes to a new node "brain_fast" which marks the
+stage TRUE with plain Python and SKIPS both the Brain and Memory LLM calls ->
+only the Decision call runs (1 Gemini call instead of 2 in sequence).
+Anything else (a "no", corrections, questions, longer sentences, mismatched
+cue, IVR, complete workflow) uses the normal Memory+Brain->Decision path
+exactly as before.
+Edits in graph.py are marked ORIGINAL / commented: the old
+`return ["memory", "brain"]` line and the old conditional-edge path list are
+kept as comments. To remove the feature: restore those lines, delete
+run_brain_fast, the "brain_fast" node/edge, and fast_path.py - or just set
+ANNE_FAST_PATH=0.
+Logged as "TRACK | FAST_PATH | stage=..." so you can see which turns used it.
+Tested locally with a stubbed Gemini: "yes speaking" -> only decision ran;
+"No, wrong email" -> brain+memory+decision ran; "yes" at the email stage -> only decision.
+NOT yet verified on a live call - check the LATENCY lines (agent ms should
+drop on yes/ok turns).
+
+5) OTHER FINDINGS
+-----------------
+- Voice: no ELEVENLABS_VOICE_ID set on Render -> default Rachel, model
+  eleven_flash_v2_5 (fastest, least natural). Change via env
+  ELEVENLABS_VOICE_ID (+ optionally ELEVENLABS_MODEL_ID=eleven_turbo_v2_5).
+  Waiting on the user to pick a voice id.
+- Render plan was upgraded (1 CPU / 2 GB). Server CPU is not the bottleneck.
+- Old Gemini API keys are left as COMMENTS in brain_agent.py / decision_agent.py
+  (also in git history) - rotate them if still valid.
+- A "wrong number" test call posts wrong_number_so_avoid=true for that person
+  to call_db and would drop them from the queue: reset the row after tests
+  (Nick Wolles person 19248 / deal 43724 was affected on 2026-10-15).
+
+6) N8N (https://adrian-11-11.app.n8n.cloud)
+-------------------------------------------
+Old main workflow "anne agentic" (BzT6b7G5YsFrOIcn) is NOT used now.
+New, inactive, manual:
+  o0DCfZ0rrKZRD3nD  "anne - queue (20) preview"  = exact copy of part 1 (build queue), Limit=20, no calls.
+  URxrraojMjPLI0ON  "anne - call one customer (table only)" = set Config.deal_id, Execute; dials the
+                    test number while Config.call_test_number=true (false = real customer). Writes the
+                    call_db table only (via the active "anne - Andrew live call" workflow's receiver at
+                    path anne-call-result, which owns that webhook URL) - NEVER touches the Pipedrive card.
+Test picks used: Nick Wolles deal 43724, person 19248 (phone 6056684150, serial 536-XD, due 2026-10-19).
