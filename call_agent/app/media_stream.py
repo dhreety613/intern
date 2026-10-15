@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime, timedelta
 
 import os
+import time
 
 from call_agent.app.call import CallSession
 from call_agent.app.call_result import build_call_result, deliver_call_result
@@ -438,8 +439,10 @@ class TwilioMediaStream:
             return last
 
         transcript = None
+        _t = time.monotonic()
         try:
             transcript = await asyncio.wait_for(_run_stt(), timeout=self.STT_TIMEOUT_SECONDS)
+            self._track("LATENCY", stage="stt", ms=int((time.monotonic() - _t) * 1000))
 
         except asyncio.TimeoutError:
             logger.error(f"STT timed out after {self.STT_TIMEOUT_SECONDS}s")
@@ -476,7 +479,9 @@ class TwilioMediaStream:
         # isn't met with dead air while it thinks.
         asyncio.create_task(self._speak_filler_while_busy())
         try:
+            _t = time.monotonic()
             result = await self._call_agent(transcript)
+            self._track("LATENCY", stage="agent", ms=int((time.monotonic() - _t) * 1000))
             response_text = result.get("response", "")
             call_ended = result.get("call_ended", False)
             decision_task = result.get("decision", {}).get("present_task", "CONTINUE")
@@ -861,7 +866,11 @@ class TwilioMediaStream:
                 frames_sent = 0
                 interrupted = False
 
+                _t = time.monotonic()
                 async for audio_chunk in self.tts.text_to_speech_stream(text):
+                    if frames_sent == 0 and _t:
+                        self._track("LATENCY", stage="tts_first_byte", ms=int((time.monotonic() - _t) * 1000))
+                        _t = None
                     if self._call_ended:
                         logger.info("Call ended mid-stream - stopping TTS output")
                         return
