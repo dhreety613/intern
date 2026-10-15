@@ -274,7 +274,10 @@ async def amd_callback(request: Request):
         # recording box even if its greeting said "press pound" (which made
         # the IVR check swallow the verdict on the Martin call, 2026-10-15).
         asyncio.create_task(
-            stream.handle_voicemail(force=answered_by == "machine_end_beep")
+            stream.handle_voicemail(
+                force=answered_by == "machine_end_beep",
+                greeting_over=answered_by != "machine_start",
+            )
         )
 
     return Response(status_code=204)

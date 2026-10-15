@@ -403,3 +403,16 @@ Open: /hangup secret not available to Claude (needed to cut a stuck call without
    - _force_hangup closes the media stream AND calls Twilio REST calls(sid).update(status=completed).
   Set either env var to 0 on Render to disable that rule. Outcome of a silent call = no_conversation.
   Tested locally with a stub (silence at 3 s, cap at 6 s). Revert: git revert the commit.
+
+2026-10-16 FIX 3: voicemail message was never heard on Neal Riebel's call (CA1eb63ad2..., deal 43706)
+  His carrier voicemail greeting was transcribed at 8 s ("...At the tone, please record your message");
+  the transcript path (voicemail_agent, 2 ms) spoke Anne's message immediately, over the still-playing
+  greeting: "Caller interrupted after 0 frames" -> message never played, call closed. (Result did post:
+  outcome=voicemail, webhook 200.)
+  Fix (app/media_stream.py): when the graph flags is_voicemail from the transcript, new
+  _leave_voicemail_after_beep() sets _voicemail (no barge-in), listens for the greeting to end
+  (Twilio AMD *_end_* verdict, or 1.5 s of quiet after >=2 s; cap 20 s), then speaks the message and hangs up.
+  New logs: VOICEMAIL_DETECTED via='transcript', VOICEMAIL_BEEP_WAIT (reason beep|quiet|max_wait), VOICEMAIL_LEFT.
+  api.py /amd-callback passes greeting_over=(answered_by != machine_start). The original direct
+  "stream response now" path still runs for every non-voicemail turn. Tested locally with a stub.
+  Revert: git revert the commit.

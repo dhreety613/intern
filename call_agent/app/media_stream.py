@@ -126,6 +126,9 @@ class TwilioMediaStream:
         #    Twilio REST in case closing the socket does not end the call).
         # Both are env-tunable on Render. Set a value to 0 to disable it.
         self._last_activity = time.monotonic()
+        self._last_voiced_mono = 0.0   # last time any voiced frame was heard (voicemail waiting)
+        self._vm_pending = False       # voicemail spotted from the transcript, waiting for the beep
+        self._beep_event = asyncio.Event()
         self._watchdog_task = None
         self.silence_timeout_seconds = int(os.getenv("ANNE_SILENCE_TIMEOUT_SECONDS", "25"))
         self.max_call_seconds = int(os.getenv("ANNE_MAX_CALL_SECONDS", "360"))
@@ -347,6 +350,13 @@ class TwilioMediaStream:
             return
 
         if self._voicemail:
+            if self._vm_pending:
+                # Keep listening for the end of the greeting / the beep.
+                try:
+                    if self._frame_is_voiced(base64.b64decode(audio_chunk)):
+                        self._last_voiced_mono = time.monotonic()
+                except Exception:
+                    pass
             return
 
         anne_speaking = self._tts_lock.locked()
@@ -532,6 +542,17 @@ class TwilioMediaStream:
         decision_data = result.get("decision", {})
         redirect_to_rep = decision_data.get("redirect_to_rep", False)
         redirect_reason = decision_data.get("redirect_reason", "")
+
+        # Voicemail recognised from the transcript: do NOT talk over the
+        # recorded greeting (the message was cut off after 0 frames on the
+        # Neal Riebel call, 2026-10-15). Wait for the beep, then speak.
+        if (
+            response_text
+            and self.session.state.get("is_voicemail")
+            and not self._voicemail
+        ):
+            await self._leave_voicemail_after_beep(response_text)
+            return
 
         # Synthesize and stream response
         if response_text:
@@ -839,11 +860,54 @@ class TwilioMediaStream:
         except Exception as e:
             logger.error(f"Failed to send call result: {e}", exc_info=True)
 
-    async def handle_voicemail(self, force: bool = False):
+    async def _leave_voicemail_after_beep(self, message: str):
+        """Voicemail spotted from the transcript: wait until the recorded
+        greeting is over (Twilio says the beep ended, or the line has been
+        quiet for VM_QUIET_SECONDS; hard cap VM_MAX_WAIT_SECONDS), then say
+        the message with barge-in off and hang up."""
+        VM_QUIET_SECONDS = 1.5
+        VM_MAX_WAIT_SECONDS = 20
+        self._track("VOICEMAIL_DETECTED", via="transcript", note="waiting for beep")
+        self._voicemail = True       # stops normal turns + barge-in
+        self._vm_pending = True
+        self._cancel_wait_timeout()
+        self.audio_buffer.clear()
+        self._last_voiced_mono = time.monotonic()
+        started = time.monotonic()
+        reason = "max_wait"
+        while time.monotonic() - started < VM_MAX_WAIT_SECONDS and not self._call_ended:
+            if self._beep_event.is_set():
+                reason = "beep"
+                await asyncio.sleep(0.3)   # let the beep tone finish
+                break
+            if (
+                time.monotonic() - started >= 2.0
+                and time.monotonic() - self._last_voiced_mono >= VM_QUIET_SECONDS
+            ):
+                reason = "quiet"
+                break
+            await asyncio.sleep(0.1)
+        self._vm_pending = False
+        if self._call_ended:
+            return
+        self._track("VOICEMAIL_BEEP_WAIT", reason=reason, waited_s=round(time.monotonic() - started, 1))
+        self._interrupt_requested = False
+        _t = time.monotonic()
+        await self._stream_tts_to_twilio(message)
+        self._track("VOICEMAIL_LEFT", spoken_s=round(time.monotonic() - _t, 1), text=message)
+        await self._send_stop()
+
+    async def handle_voicemail(self, force: bool = False, greeting_over: bool = True):
         """Twilio's async AMD says a machine answered: cut off whatever
         Anne is saying, leave the fixed message and hang up."""
         from call_agent.app.agents.voicemail_agent import VOICEMAIL_MESSAGE
 
+        if self._vm_pending:
+            # Already waiting for the beep (transcript detection): a later
+            # AMD "...end_*" verdict means the greeting/beep is over.
+            if greeting_over:
+                self._beep_event.set()
+            return
         if self._voicemail or self._call_ended:
             return
 
