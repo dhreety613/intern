@@ -337,6 +337,39 @@ async def redirect_whisper(customer_name: str = "the customer", reason: str = ""
     return Response(content=twiml, media_type="text/xml")
 
 
+@router.post("/hangup")
+def hangup(request: Request, call_sid: str = ""):
+    """Kill switch: end a live call from our side.
+
+    Requires the X-Webhook-Secret header (same secret as the call-result
+    webhook). With no call_sid, ends every call this server is streaming.
+    """
+    import os
+    from twilio.rest import Client
+    from call_agent.app.media_stream import ACTIVE_STREAMS
+
+    secret = os.getenv("CALL_RESULT_WEBHOOK_SECRET")
+    if not secret or request.headers.get("x-webhook-secret") != secret:
+        raise HTTPException(status_code=401, detail="Bad or missing secret.")
+
+    account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+    auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+    if not account_sid or not auth_token:
+        raise HTTPException(status_code=500, detail="Twilio credentials not set.")
+
+    sids = [call_sid] if call_sid else list(ACTIVE_STREAMS.keys())
+    client = Client(account_sid, auth_token)
+    ended = []
+    for sid in sids:
+        try:
+            client.calls(sid).update(status="completed")
+            ended.append(sid)
+            logger.info(f"TRACK | HANGUP_REQUESTED | call={sid} | by=api")
+        except Exception as e:
+            logger.error(f"TRACK | HANGUP_FAILED | call={sid} | error={e!r}")
+    return {"ended": ended, "requested": sids}
+
+
 @router.post("/test-call")
 def trigger_test_call(
     request: Request,
