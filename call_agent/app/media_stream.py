@@ -119,6 +119,17 @@ class TwilioMediaStream:
         self.wait_timeout_seconds = 90
         self.wait_timeout_task = None
 
+        # CALL WATCHDOG (added 2026-10-16): no call may stay open forever.
+        #  - silence: nobody speaks for SILENCE_TIMEOUT_SECONDS after Anne
+        #    last finished talking -> short goodbye + hang up.
+        #  - max length: MAX_CALL_SECONDS total -> hard hang up (also via
+        #    Twilio REST in case closing the socket does not end the call).
+        # Both are env-tunable on Render. Set a value to 0 to disable it.
+        self._last_activity = time.monotonic()
+        self._watchdog_task = None
+        self.silence_timeout_seconds = int(os.getenv("ANNE_SILENCE_TIMEOUT_SECONDS", "25"))
+        self.max_call_seconds = int(os.getenv("ANNE_MAX_CALL_SECONDS", "360"))
+
         # Serialize audio writes so the greeting and replies don't interleave
         # frames on the socket.
         self._tts_lock = asyncio.Lock()
@@ -206,6 +217,7 @@ class TwilioMediaStream:
 
                 elif event == "start":
                     self._handle_start(data)
+                    self._start_watchdog()
 
                 elif event == "media":
                     await self._handle_media(data)
@@ -221,6 +233,8 @@ class TwilioMediaStream:
         finally:
             self._call_ended = True
             self._cancel_wait_timeout()
+            if self._watchdog_task:
+                self._watchdog_task.cancel()
             self._track_end()
             if self._voicemail_key_task:
                 self._voicemail_key_task.cancel()
@@ -365,6 +379,7 @@ class TwilioMediaStream:
         self.audio_buffer.extend(audio_bytes)
 
         if voiced:
+            self._last_activity = time.monotonic()
             # Customer is actively speaking - cancel any pending wait timeout.
             self._cancel_wait_timeout()
             self._voiced_ms += frame_ms
@@ -682,6 +697,64 @@ class TwilioMediaStream:
             pass
         except Exception as e:
             logger.error(f"Wait timeout handler error: {e}")
+
+    def _start_watchdog(self):
+        if self._watchdog_task is None:
+            self._started_mono = time.monotonic()
+            self._watchdog_task = asyncio.create_task(self._watchdog())
+
+    async def _watchdog(self):
+        """Ends the call on prolonged silence or when it runs too long."""
+        try:
+            while not self._call_ended:
+                await asyncio.sleep(1)
+                now = time.monotonic()
+
+                if self.max_call_seconds and now - self._started_mono >= self.max_call_seconds:
+                    self._track("MAX_DURATION", seconds=self.max_call_seconds)
+                    await self._force_hangup("max_duration")
+                    return
+
+                # Anne talking / a turn being processed counts as activity.
+                if self._tts_lock.locked() or self._processing or self._agent_lock.locked():
+                    self._last_activity = now
+                    continue
+                # The 90 s WAIT timer (customer asked us to hold) has its own clock.
+                if self.wait_timeout_task is not None or self._voicemail:
+                    self._last_activity = now
+                    continue
+
+                if self.silence_timeout_seconds and now - self._last_activity >= self.silence_timeout_seconds:
+                    self._track("SILENCE_TIMEOUT", seconds=self.silence_timeout_seconds)
+                    line = "Hello? I'm having trouble hearing you. I'll try again another time. Goodbye."
+                    try:
+                        self._say("Anne", line)
+                        await asyncio.wait_for(self._stream_tts_to_twilio(line), timeout=15)
+                    except Exception as e:
+                        logger.error(f"Silence goodbye failed: {e}")
+                    await self._force_hangup("silence")
+                    return
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Watchdog error: {e}", exc_info=True)
+
+    async def _force_hangup(self, reason: str):
+        """Close the stream AND ask Twilio to complete the call."""
+        self._track("FORCE_HANGUP", reason=reason)
+        await self._send_stop()
+        sid = self.call_sid
+        account_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        auth_token = os.getenv("TWILIO_AUTH_TOKEN")
+        if not (sid and account_sid and auth_token):
+            return
+        try:
+            from twilio.rest import Client
+            await asyncio.to_thread(
+                lambda: Client(account_sid, auth_token).calls(sid).update(status="completed")
+            )
+        except Exception as e:
+            logger.warning(f"Twilio hangup after {reason} failed (call may already be over): {e}")
 
     async def _send_opening_greeting(self):
         """Send Anne's opening greeting to caller."""

@@ -387,3 +387,19 @@ Queue: n8n "anne - queue (20) preview" (Limit node = 100) returned 100 people on
 New log events: VOICEMAIL_DETECTED / _LEFT / _IGNORED / _KEY_TIMEOUT, IVR_PRESS (see 2026-10-16 changelog).
 Open: /hangup secret not available to Claude (needed to cut a stuck call without restarting the server);
   voice change (ELEVENLABS_VOICE_ID) still waiting on a voice choice.
+
+2026-10-16 CALL WATCHDOG (a call must never stay open)
+  Problem: the only timeout was the 90 s WAIT timer (armed only after a customer reply with a WAIT
+  decision). Silence after the greeting (Anthony Alatorre CA672a22..., Martin Saucedo) or a stuck call
+  had no limit.
+  Added in app/media_stream.py (new code only, nothing removed): _watchdog(), _start_watchdog(),
+  _force_hangup(), self._last_activity (updated on every voiced customer frame), started on the Twilio
+  "start" event, cancelled in handle()'s finally.
+   - SILENCE: no customer speech for ANNE_SILENCE_TIMEOUT_SECONDS (default 25) after Anne last spoke
+     / a turn finished -> Anne says "Hello? I'm having trouble hearing you. I'll try again another
+     time. Goodbye." -> hang up.  Log: TRACK SILENCE_TIMEOUT, FORCE_HANGUP.
+     Skipped while Anne talks, a turn is processing, a WAIT timer is running, or in voicemail mode.
+   - MAX LENGTH: ANNE_MAX_CALL_SECONDS (default 360) -> hard hang up.  Log: MAX_DURATION, FORCE_HANGUP.
+   - _force_hangup closes the media stream AND calls Twilio REST calls(sid).update(status=completed).
+  Set either env var to 0 on Render to disable that rule. Outcome of a silent call = no_conversation.
+  Tested locally with a stub (silence at 3 s, cap at 6 s). Revert: git revert the commit.
