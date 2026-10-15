@@ -348,3 +348,17 @@ yes/yeah/mhm/correct) now qualifies. Any other word ("not","but","could","email"
 transcripts with Hindi/Tamil words never fast-path). The old exact-match block is kept as
 a comment inside fast_brain_update(). Local table test: 12/12 cases as expected.
 Kill switch unchanged: ANNE_FAST_PATH=0 on Render.
+
+
+================================================================
+CHANGELOG 2026-10-16  (voicemail / IVR / reroute logging)
+================================================================
+First real call to Nick Wolles (deal 43724) = voicemail, 21 s. Result webhook
+returned 404 because the n8n receiver workflow was inactive (re-activated by user).
+Added TRACK events in app/media_stream.py (logging only, no behaviour change):
+  VOICEMAIL_DETECTED (forced=...), VOICEMAIL_LEFT (spoken_s, full text),
+  VOICEMAIL_IGNORED (AMD said machine but an IVR was seen), VOICEMAIL_KEY_TIMEOUT,
+  IVR_PRESS (key), and the voicemail text is now also a TURN / in the CALL_END
+  transcript as "Anne (voicemail message)". REDIRECT_TO_REP already existed.
+Per-customer results are kept in pipedrive_audit/anne_test_report.txt (update after each test).
+Revert: git revert of this commit (logging only).

@@ -726,6 +726,7 @@ class TwilioMediaStream:
                 return
 
             logger.info("Voicemail key pressed, no greeting heard - leaving message")
+            self._track("VOICEMAIL_KEY_TIMEOUT", note="key pressed, no greeting heard, leaving message")
             await self.handle_voicemail(force=True)
         except asyncio.CancelledError:
             pass
@@ -782,9 +783,11 @@ class TwilioMediaStream:
             and self.session.state.get("ivr", {}).get("seen")
         ):
             logger.info("AMD says machine but an IVR was detected - ignoring")
+            self._track("VOICEMAIL_IGNORED", reason="IVR already detected, keep navigating menu")
             return
 
         logger.info(f"Voicemail detected for call {self.call_sid}")
+        self._track("VOICEMAIL_DETECTED", forced=force)
         self._voicemail = True
         self._cancel_wait_timeout()
         self.audio_buffer.clear()
@@ -795,7 +798,10 @@ class TwilioMediaStream:
             self.session.state["is_voicemail"] = True
             self.session.state["call_ended"] = True
 
+        self._say("Anne (voicemail message)", VOICEMAIL_MESSAGE)
+        _t = time.monotonic()
         await self._stream_tts_to_twilio(VOICEMAIL_MESSAGE)
+        self._track("VOICEMAIL_LEFT", spoken_s=round(time.monotonic() - _t, 1), text=VOICEMAIL_MESSAGE)
         await self._send_stop()
 
     async def _speak_filler_while_busy(self):
@@ -839,6 +845,7 @@ class TwilioMediaStream:
         async with self._tts_lock:
             for digit in digits:
                 logger.info(f"IVR: pressing {digit!r}")
+                self._track("IVR_PRESS", key=digit)
                 audio = dtmf_ulaw(digit)
                 for i in range(0, len(audio), self.TWILIO_FRAME_BYTES):
                     frame = audio[i:i + self.TWILIO_FRAME_BYTES]
