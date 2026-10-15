@@ -370,3 +370,8 @@ Revert: git revert of this commit (logging only).
   Fix (app/api.py /amd-callback): answered_by == "machine_end_beep" now calls
   handle_voicemail(force=True), which skips the IVR guard. Original line kept as a comment.
   Revert: restore the commented line.
+
+2026-10-16 FIX 2 (Martin retry CAb4a925...): Twilio AMD verdict was not machine_end_beep, so FIX 1 did not apply.
+  app/media_stream.py handle_voicemail: the "IVR seen -> ignore AMD machine verdict" guard now also requires
+  that Anne pressed at least one key (ivr["presses"]). A greeting with "press pound" and no presses = voicemail.
+  Original guard kept as a comment above the new condition.

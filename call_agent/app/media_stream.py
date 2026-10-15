@@ -781,6 +781,10 @@ class TwilioMediaStream:
             not force
             and self.session is not None
             and self.session.state.get("ivr", {}).get("seen")
+            # ORIGINAL guard was just the line above. Now only keep
+            # navigating if we actually pressed keys; a "menu" we never
+            # pressed anything on is a voicemail greeting ("press pound...").
+            and self.session.state.get("ivr", {}).get("presses")
         ):
             logger.info("AMD says machine but an IVR was detected - ignoring")
             self._track("VOICEMAIL_IGNORED", reason="IVR already detected, keep navigating menu")
