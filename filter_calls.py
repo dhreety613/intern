@@ -5,7 +5,8 @@ VALID_AGENTS = {
     "Travis Jeke",
     "Ian Semasko",
     "Alex De Jesus",
-    "Matthew Pelton"
+    "Matthew Pelton",
+    "Lexter De Jesus"
 }
 
 VALID_TYPES = {
