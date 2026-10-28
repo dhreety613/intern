@@ -29,7 +29,8 @@ MODEL = "gemini-3.5-flash-lite"
 
 # Hard caps so a menu loop can never keep the call alive forever.
 MAX_PRESSES = 4
-MAX_CONSECUTIVE_WAITS = 3
+# ORIGINAL: MAX_CONSECUTIVE_WAITS = 3
+MAX_CONSECUTIVE_WAITS = 5  # 2026-10-28 operator rule (was 3)
 MAX_IVR_TURNS = 10
 HEARD_WINDOW = 4
 
@@ -62,6 +63,36 @@ _IVR_CUES = (
 def looks_like_ivr(text: str) -> bool:
     lowered = (text or "").lower()
     return any(cue in lowered for cue in _IVR_CUES)
+
+
+# 2026-10-28 OPERATOR RULE: menus arrive one option per turn, so the LLM kept
+# saying "wait" and the wait cap hung up before pressing an option it had
+# already heard. Deterministic scan for "<live-person option> ... press N" /
+# "press N for <live-person option>" in the newest fragment.
+_LIVE_WORDS = (
+    r"operator|receptionist|representative|customer care|customer service|"
+    r"inquiries|enquiries|sales|someone|a person|an agent"
+)
+_DIGIT_WORDS = {
+    "zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+    "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+    "star": "*", "pound": "#", "hash": "#",
+}
+_DIGIT = r"(\d|zero|one|two|three|four|five|six|seven|eight|nine|star|pound|hash)"
+_LIVE_PRESS = [
+    re.compile(rf"(?:{_LIVE_WORDS})[^.]{{0,40}}?\b(?:press|dial)\s+{_DIGIT}\b", re.I),
+    re.compile(rf"\b(?:press|dial)\s+{_DIGIT}\b[^.]{{0,20}}?\bfor\b[^.]{{0,25}}?(?:{_LIVE_WORDS})", re.I),
+]
+
+
+def find_live_person_key(text: str) -> str:
+    """Return the key for a live-person menu option named in `text`, or ''."""
+    for pat in _LIVE_PRESS:
+        m = pat.search(text or "")
+        if m:
+            tok = m.group(1).lower()
+            return _DIGIT_WORDS.get(tok, tok)
+    return ""
 
 
 def _new_ivr_state() -> Dict[str, Any]:
@@ -188,6 +219,15 @@ def ivr_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     if action == "press" and not re.fullmatch(r"[0-9*#]", digit):
         action = "wait"
 
+    target = verdict.get("target", "")
+    reason = verdict.get("reason", "")
+
+    # Operator rule 1: press a named live-person option at once.
+    if action != "press" and not ivr["presses"]:
+        live_key = find_live_person_key(text)
+        if live_key:
+            action, digit, target, reason = "press", live_key, "representative", "operator rule: live-person option heard"
+
     if action == "wait":
         ivr["waits"] += 1
     else:
@@ -199,7 +239,11 @@ def ivr_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         or ivr["waits"] > MAX_CONSECUTIVE_WAITS
         or ivr["turns"] > MAX_IVR_TURNS
     ):
-        action = "hangup"
+        # Operator rule 2: nothing pressed yet -> try 0 once instead of hanging up.
+        if not ivr["presses"] and ivr["waits"] > MAX_CONSECUTIVE_WAITS:
+            action, digit, target, reason = "press", "0", "representative", "operator rule: wait cap reached, trying 0"
+        else:
+            action = "hangup"
 
     if action == "press":
         ivr["presses"].append(digit)
@@ -213,8 +257,10 @@ def ivr_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "is_ivr": True,
             "action": action,
             "digit": digit if action == "press" else "",
-            "target": verdict.get("target", ""),
-            "reason": verdict.get("reason", ""),
+            # ORIGINAL: "target": verdict.get("target", ""), "reason": verdict.get("reason", "")
+            "target": target,
+            "reason": reason,
+            "heard": list(ivr["heard"]) if action != "press" else [text],
         },
     }
 
@@ -240,6 +286,7 @@ def ivr_respond(state: Dict[str, Any]) -> Dict[str, Any]:
             # the fixed line still plays if only a beep follows (no greeting).
             "voicemail_key": action == "press" and result.get("target") == "voicemail",
             "ivr": True,
+            "ivr_log": {k: result.get(k) for k in ("action", "digit", "target", "reason", "heard")},
             "needs_context": False,
             "topic_diversion": False,
             "random_conversation": False,

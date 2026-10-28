@@ -416,3 +416,132 @@ Open: /hangup secret not available to Claude (needed to cut a stuck call without
   api.py /amd-callback passes greeting_over=(answered_by != machine_start). The original direct
   "stream response now" path still runs for every non-voicemail turn. Tested locally with a stub.
   Revert: git revert the commit.
+
+
+================================================================
+CHANGELOG 2026-10-28  (queue of 100 for batched real-customer calls)
+================================================================
+Built 2026-10-28 17:24 UTC by running a webhook copy of n8n 'anne - queue (20) preview' (Limit=100, same
+Clean queue rules). Temp workflow gPzhEXYnQyu2uJmM 'anne - queue export (100) TEMP' (now INACTIVE, can delete).
+Plan: call in batches of 20 (BATCH 1 = #1-20, ...), 2 min gap between calls, call_db table only (NO Pipedrive
+cards), results/summary per call in pipedrive_audit/present.txt, user reviews after each 20.
+Caveats seen in the queue: some phones are non-US (+1 514 Canada, +52 Mexico), some have extensions, 3 have no
+serial/due date. Queue order = as returned by Clean queue (newest first).
+QUEUE (#|deal_id|person_id|name|phone|serial|due|org):
+001|46469|17184|Alin Erdei|+15143392168|||Bombardier - St. Laurent, QC, Canada
+002|46237|21139|Kialee Heinl|(920) 426-5894 x 1219|||Fox Valley Metrology - Oshkosh, WI
+003|44004|18110|Jose Ortega|5625568850|5653-SX, 5654-SX|2026-11-26|AG INGENIERIA
+004|43999|18453|Aidyn Perlongo|6305505000|5655-SX|2026-11-26|Assurance Technologies (ATI Quality)
+005|43998|8380|Herminio Melendez|+52 55 5899 1600|537-XD|2026-11-26|Albany International - Mexico
+006|43997|8684|Libby Harrell|207-494-1599|538-XD|2026-11-26|Fiber Materials - Biddeford, ME
+007|43959|2869|Matt Denny|+44 (0) 1689 842999|896-JX, 897-JX, 898-JX, 899-JX, 900-JX, 901-JX|2026-11-19|Adams Aviation Supply - UK
+008|43954|1496|Nathalie Lachaux|33-490-099-912|5648-SX, 5649-SX, 5650-SX, 5651-SX|2026-11-19|Altic - France
+009|43950|16948|Anja Lefebvre|+31 499799664|5646-SX|2026-11-19|Signode - Netherlands
+010|43949|19761|Mike Merritt|3143133405|5647-SX|2026-11-19|Tiemann Industrial Supply - St. Louis, MO
+011|43947|1494|Rene Ocon|+52 55 2603-7450|5644-SX|2026-11-19|Atrya Plast - Mexico
+012|43946|11332|Josie Luevano|+19513729555 x1370|891-JX, 892-JX, 893-JX|2026-11-19|Irwin International / Aircraft Spruce
+013|43940|19498|Patrick Schulte|+49 68939876200|887-JX|2026-11-19|Aero Avionik GmbH - Germany
+014|43936|18414|Juho Partanen|+358407739411|895-JX|2026-11-18|Scanwings Oy - Finland
+015|43935|2932|Angie Vails (no longer works here)|+14056886888|882-JX, 883-JX, 884-JX, 885-JX, 886-JX|2026-11-18|Brown Aviation Tool - Oklahoma City, OK
+016|43905|19546|Cynthia Seigworth|+1 412-629-7451|567-WBT|2026-11-16|White Construction - Meyersdale, PA
+017|43776|19609|Andrew Trummer|8605281311|5643-SX|2026-10-26|Glen-Gery - Cheswick, PA
+018|43767|16627|Rich Roberts|+44 (0) 1785 294 749|5638-SX|2026-10-23|Rokholt Group Ltd - UK
+019|43759|18749|Miranda Madilonga|+10671257046|5642-SX|2026-10-22|Kingsley Beverage - South Africa
+020|43749|7154|Mike Kenny|+12815169292|5635-SX, 5636-SX|2026-10-21|ABQ Industrial - Tomball, TX
+021|43747|18981|Lorena Cutaru|+40 737 878 935|5640-SX, 5641-SX|2026-10-21|Canpack - Bucharest, Romania
+022|43732|7289|Michael Zhang|86 (0)10 65684616|5605-SX; 562-WBT, 563-WBT, 564-WBT|2026-10-19|Better Tech / Baitai Xingyuan - China
+023|43729|2036|MinKyung Sung|+82 226790582|531-XD, 532-XD, 533-XD, 534-XD, 535-XD|2026-10-19|Sekyung Hi-Tech, Inc. - Korea
+024|43724|19248|Nick Wolles|6056684150|536-XD|2026-10-19|Vishay - Yankton, SD
+025|43723|1966|Martin Saucedo|6313543097|530-XD|2026-10-19|Beta-NH Signal Processing
+026|43706|19129|Neal Riebel|717-433-0169|565-WBT|2026-10-15|Vitro Glass - Carlisle, PA
+027|43690|19341|Lienne Su|7206524440|5624-SX|2026-10-13|J M Smucker - Longmont, CO
+028|43688|19404|Jeffrey Thrush|7343547050|5622-SX|2026-10-13|Plastipak - Ottumwa, IA
+029|43668|18594|Tyler Sawchuk|+18622464116|559-WBT, 560-WBT, 561-WBT|2026-10-12|White Construction - Canada
+030|43642|19071|Jim Green|+19036752256|5627-SX|2026-10-08|Red River Brick
+031|43601|17605|Dirk Braches|+49210396067420|5602-SX|2026-10-01|Signode Packaging Systems GmbH
+032|41905|4128|Joshua Loh|+(65) 6451 1123|4894-SX||LMS Tech - Singapore
+033|41811|1017|Michael Michalek|+18059867682|580-JX|2026-02-05|ANG - Port Hueneme, CA (Channel Islands)
+034|41791|16145|Pete Walsh|6077297179 |578-JX, 579-JX|2026-02-03|Detekion Security Systems, Inc. - Vestal, NY
+035|41192|15221|Hyunmin SO|+810171773802|422-XD|2026-01-31|KGF Co Ltd
+036|41144|14622|Mary Schmitt|4436216701|616-FX|2026-11-27|Upright Scaffold USA
+037|41112|15463|Adeline Miermont-Butcher|4193449270|497-WBT|2026-11-24|Vipo US - Toledo, OH
+038|41098|15212|Carlos Palacios|5208065682|450-XD|2026-11-20|Rain Bird - Tucson, AZ
+039|41093|12888|Miriam Zamora|+52 555 685 1794 x126|496-WBT|2026-11-20|Potencia Industrial, S.A. de C.V.
+040|41086|14964|Steve Watts|8647102635|448-XD|2026-11-19|Ulbrich (Vallen) - Westminster, SC
+041|41022|14572|Jakob Pearson|8003682493|429-XD|2026-11-13|Chromalox Inc. - Ogden, UT
+042|41008|15248|Rosel Ian Oro|+966 12 597 4301 to 04 Ext. 134|5242-SX|2026-11-12|Southern Can Making Co
+043|41006|15150|Bert Lazou|+32 (0) 486 61 59 34|5227-SX|2026-11-12|Certis Benelux nv
+044|40892|15349|Stone Pommert|+14196627868 x7868|5241-SX|2026-11-11|First Solar - Perrysburg, OH
+045|40891|15350|Angie Eilers|+18159397270 x83505|5233-SX|2026-11-11|Ring Container - Kankakee, IL
+046|40889|12992|Christian Milian|8059226682 x5247|358-JX|2026-11-11|Okonite Company - Paterson, NJ
+047|40887|13905|Eddie Henley|+16625542658|445-XD|2026-11-11|Solero / BorgWarner - Water Valley, MS
+048|40781|15258|Ben Dugan|8173043319|5220-SX|2026-01-30|Acme Brick - Millsap, TX
+049|40764|14219|Jose Acosta|+18643161289|438-XD|2026-10-26|AFL Global - Duncan, SC
+050|40738|14979|Terry Smith| 8063354343|454-JX|2026-10-26|Amarillo College AMT School
+051|40707|12964|Tom Warner|864-256-5023 |444-XD|2026-10-22|AFL Global - Duncan, SC
+052|40692|4869|Erik Brenner|(712) 551-2144 ext. 280|427-XD|2026-10-21|Coilcraft - Hawarden, IA
+053|40688|13444|Joseph Thorn|+16269055408|425-XD|2026-10-21|Cortland International - Stafford, TX
+054|40650|15341|Joe Benedict|2153629694|F-910|2026-11-27|American Manufacturing & Engineering
+055|40625|13026|Vince Patterson|601-936-0754|344-EX|2026-11-20|King Air Nation - Brandon, MS
+056|40622|2300|Sandra Smith|774-233-7273|3463-SX|2026-11-20|Cold Chain Technologies - Franklin, MA
+057|40611|12094|Beneica Anderson|601-554-3531|1119-SX|2026-11-19|Western Container - Hattiesburg, MS
+058|40569|15157|Forrest (Frosty) Buck|4067511244|5304-SX|2026-10-05|Weyerhaeuser - Kalispell, MT
+059|40453|15129|Chad Ezell|2545593051|944-EX|2026-11-09|Ezell Aviation - Breckenridge, TX
+060|40326|985|Max Lapointe|6038387288|982-XC|2026-11-02|New England Wire Technologies
+061|40320|12696|Berin Blashack|7632498143|83037|2026-11-03|Productivity Quality Inc.
+062|40314|15011|Jim May|7133602814|F-909|2026-11-03|Gagemaker LP - Pasadena, TX
+063|40278|14984|Ángel Darío Tavares|812 200 1780|22773|2026-10-19|ALE Service - Mexico
+064|40263|14728|Tim Mason|+17143229310|23357|2026-11-03|NSWC Corona - Norco, CA
+065|40219|10609|David Ormsby (retired)|7344181839|824-AX|2026-11-06|NuStep LLC - Plymouth, MI
+066|40207|14935|Michael Healy|+18143310367|3975-SX|2026-11-03|Ardagh (Glass) - Port Allegany, PA
+067|40153|14891|Chris Patterson|2159627877|415-DX|2026-10-02|Torque Testing Inc. - Richboro, PA
+068|40145|3479|Dave Blevins|541-679-2785|3940-SX|2026-10-19|Roseburg Forest Products - Dillard, OR
+069|40046|14769|Iris Over|+49 02224 14 511|859-SX|2026-10-16|Hitachi Energy Germany
+070|39943|5641|Gary Findley|713-644-2290|987-BX|2026-10-12|Falcon Crest Aviation
+071|39796|14525|Luis Espinosa|281-633-5300|859-GX|2026-10-15|WireCo WorldGroup - Rosenberg, TX
+072|39159|14086|Filip Lorincz|+420732594960|3284-SX|2026-11-13|Ball - Czech Republic
+073|39110|13217|Kevin J. Mangiafico|7878633085|374-XD|2026-03-11|Peter Paul Electric - Puerto Rico
+074|39001|14897|Francisco Sosa|+19097705700|5083-SX|2026-10-16|DCI Hollow Metal - Fontana, CA
+075|38956|6178|Angel Lugo|+15206406963|830-BX|2026-10-01|Belden Wire - Nogales, AZ
+076|38930|17244|Matthew Reby|7735853630|223-JX|2026-02-23|Eagle Aircraft & Transportation - Fort Lauderdale
+077|38927|13318|Jimmy Griggs|2292510480|5068-SX|2026-02-23|Ring Container - Valdosta, GA
+078|38926|13272|David Cantu|9568907150|5070-SX|2026-02-23|Fronterra Packaging - McAllen, TX
+079|38923|12995|Todd Ylvisaker|6089120446|5060-SX|2026-02-23|Sonoco - Deforest, WI
+080|38917|3740|Michelle Young|4787816800|5064-SX|2026-02-23|Cherokee Brick - Macon, GA
+081|38860|11250|Tab McGriff|2395978555|4730-SX|2026-10-30|Pelican Wire Co, Inc
+082|38595|13811|Sara Robles|209-718-8869|3801-SX|2026-11-13|Graham - Modesto (Finch), CA
+083|38379|21111|Robert Bruce|+16627821732|5017-SX|2026-11-10|Ardagh (Metal) - Olive Branch, MS
+084|38377|13204|Shawn Carson|+16097545040|175-JX|2026-10-15|USAF - McGuire AFB (JB MDL), NJ
+085|38144|529|Eric Hickenbottom|330-416-6523|319-XD|2026-11-19|Meteor Sealing Systems - Dover, OH
+086|38122|12987|Gabriel Soto Perez|+54 9 11 7609 2450|5011-SX|2026-11-18|Vidrieria Argentina - Argentina
+087|38089|12949|Cesar Da Silveira| +33 623247352|23678|2026-11-17|Dexfly Air Support - France
+088|38085|2330|Daniel Egge|812-397-2190|2169-SX|2026-11-16|Brampton Brick - Farmersburg, IN
+089|38082|11029|Todd Lantau|3095582314|520-BX|2026-11-13|Elliott Aviation - Milan, IL
+090|38042|6494|Debbie Frieszell|937-918-2440|321-XD|2026-11-09|Johnson Electric - Mexico
+091|38033|1497|Scott Diestelkamp|+13096977716|CY-128|2026-10-14|Liberty Steel & Wire - Peoria, IL
+092|38029|13214|Christopher Vermeulen|+447772717975|3843-SX|2026-11-06|Ball - Wakefield, UK
+093|38028|13468|Martin Musial|4033274582|23586|2026-11-05|QL Aviation Services - Lethbridge, AB
+094|38027|11763|Austin Jeffery Beasley|2602253232|977-IX|2026-10-13|HindSite Inc. - Mentone, IN
+095|38022|12239|Lukasz Krynicki|+447818220954|5008-SX|2026-11-03|Encirc Glass - Cheshire, UK
+096|37975|13480|Ross Stern|+1 630-616-5781|275-XC|2026-10-30|MC Machinery - Elk Grove Village, IL
+097|37954|4820|David Potter|559-212-7454|2914-SX|2026-10-29|Los Gatos Tomato Products
+098|37939|1703|Donald Tumas|+15402650690 x 6934|E-840|2026-11-20|Optical Cable - Roanoke, VA
+099|37881|14486|Darrin Landrus|3184557397|186-HX|2026-11-25|Calumet Lubricants - Shreveport, LA
+100|37878|13083|Martina Oxoby|5413465880|992-IX|2026-10-09|University of Oregon
+
+================================================================
+CHANGELOG 2026-10-28  (batch 1 results + phone-menu OPERATOR RULE)
+================================================================
+Batch 1 (20 real customers, 17:31-18:33 UTC, n8n 'anne - batch caller (real customers, table only)' gGk88ouQaPPT6M2v,
+2 min gap after each call): 14 voicemail (message left), 5 silent/instant hang-up, 1 phone menu (Jakob Pearson),
+1 'person unavailable' recording (Martin Saucedo), 1 no pickup (Lienne Su). 0 live humans. Details: pipedrive_audit/present.txt.
+Batch queue rule: US numbers only (+1/10-digit, extensions ok), must have serial + due date, skip 'no longer works' / Mexico / Canada / South Africa orgs and test contact Andrew Trummer.
+
+OPERATOR RULE (app/agents/ivr_agent.py + one log line in app/media_stream.py), all four parts of the 2026-10-16 proposal:
+ 1) find_live_person_key(): regex on the newest menu fragment ("customer care/service, operator, receptionist, representative,
+    inquiries, sales ... press N" or "press N for <those>") -> press at once, even if the LLM said wait (only before any key was pressed).
+ 2) wait cap reached with no key pressed -> press 0 once instead of hanging up.
+ 3) MAX_CONSECUTIVE_WAITS 3 -> 5 (original kept as comment).
+ 4) new log: TRACK | IVR_DECISION | action, digit, target, reason, heard  (decision['ivr_log'] -> media_stream).
+Tested locally with a stubbed classifier (Luis Espinosa's menu: 'customer care, press one' -> presses 1; 6 waits -> presses 0).
+Revert: git revert the commit.

@@ -558,6 +558,9 @@ class TwilioMediaStream:
         if response_text:
             await self._stream_tts_to_twilio(response_text)
 
+        if decision_data.get("ivr_log"):
+            self._track("IVR_DECISION", **decision_data["ivr_log"])
+
         # IVR navigation: press the chosen key (Anne stays silent).
         if decision_data.get("dtmf"):
             await self._send_dtmf(decision_data["dtmf"])
