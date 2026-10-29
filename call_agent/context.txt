@@ -641,3 +641,15 @@ Three problems found and fixed (ivr_agent.py, call.py):
  3) WireCo (deal 39796): after pressing 1 -> "enter the extension... otherwise press zero" -> Anne hung up. Fix: 'otherwise ... press zero' => press 0; rule 1 may now press a second,
     different live-person key (was: only before any key had been pressed).
 Hickenbottom (deal 38144): carrier said voicemail box not set up -> nothing to leave; now correctly recorded as voicemail (Jim May fix).
+
+2026-10-29 PROMPT-DRIVEN IVR (replaces the regex patches from the 75f8fdd fixes; deployed before batch 4):
+ ivr_agent.py: the classifier LLM now runs on EVERY customer turn until human_confirmed (was: only when a keyword cue matched) and returns speaker =
+ menu | person | voicemail_greeting | unclear for the LATEST line only (earlier lines = context). Routing:
+  - person after we pressed keys -> _no_longer_ivr() -> action 'restart' -> call.py _restart_conversation() = the tested workflow from the opening line
+    (same mechanism as the wrong-person flow). Fixes DCI Hollow Metal (operator answered "DCI, how can I help you?" and Anne stayed silent).
+  - voicemail_greeting -> action 'voicemail' + call.py flags is_voicemail so the stream waits for the beep (Cherokee Brick: greeting said "press pound when finished").
+  - menu -> prompt prefers named live-person options and makes PRESS 0 the default when nothing better is offered / at extension prompts (WireCo).
+ The keyword lists (looks_like_ivr / looks_like_voicemail) are only a FALLBACK if the Gemini call fails. call.py's keyword voicemail pre-check is skipped while LLM_IVR is on.
+ Kill switch: env ANNE_LLM_IVR=0 on Render -> old keyword-gated behaviour. Cost: one extra gemini-3.5-flash-lite call per early turn (before name confirmed).
+ Not verified against the real model before deploy (local key invalid) - batch 4 (2026-10-30 13:00 UTC) is the first live test: look for IVR_DECISION/IVR_PRESS/restart and
+ any wrong 'person' verdicts on voicemail greetings.

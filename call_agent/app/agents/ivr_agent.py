@@ -20,12 +20,19 @@ from typing import Any, Dict, List
 
 from google import genai
 
+from call_agent.app.agents.voicemail_agent import looks_like_voicemail
 from call_agent.app.greeting import opening_message
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set.")
 MODEL = "gemini-3.5-flash-lite"
+
+# 2026-10-29: the LLM decides menu / voicemail / person on every customer turn until
+# a human is confirmed (it used to run only when a keyword cue matched). The keyword
+# lists below are now just the fallback when the model call fails. ANNE_LLM_IVR=0
+# restores the old keyword-gated behaviour without a deploy.
+LLM_IVR = os.getenv("ANNE_LLM_IVR", "1") != "0"
 
 # Hard caps so a menu loop can never keep the call alive forever.
 MAX_PRESSES = 4
@@ -79,20 +86,6 @@ _DIGIT_WORDS = {
     "star": "*", "pound": "#", "hash": "#",
 }
 _DIGIT = r"(\d|zero|one|two|three|four|five|six|seven|eight|nine|star|pound|hash)"
-# 2026-10-29 (WireCo): after "enter the extension ... otherwise press zero" the
-# operator is behind 0.
-_ZERO_FALLBACK = re.compile(
-    r"(?:otherwise|if you (?:do not|don't) know)[^.]{0,80}?\bpress\s+(zero|0)\b", re.I
-)
-
-# 2026-10-29 (DCI Hollow Metal): once we have pressed a key, a greeting like
-# "DCI, how can I help you?" means a person picked up.
-_HUMAN_GREETING = re.compile(
-    r"\b(how (?:can|may) (?:i|we) (?:help|direct|assist)|can i help you|may i help you|"
-    r"what can i do for you)\b",
-    re.I,
-)
-
 _LIVE_PRESS = [
     re.compile(rf"(?:{_LIVE_WORDS})[^.]{{0,40}}?\b(?:press|dial)\s+{_DIGIT}\b", re.I),
     re.compile(rf"\b(?:press|dial)\s+{_DIGIT}\b[^.]{{0,20}}?\bfor\b[^.]{{0,25}}?(?:{_LIVE_WORDS})", re.I),
@@ -106,9 +99,6 @@ def find_live_person_key(text: str) -> str:
         if m:
             tok = m.group(1).lower()
             return _DIGIT_WORDS.get(tok, tok)
-    m = _ZERO_FALLBACK.search(text or "")
-    if m:
-        return "0"
     return ""
 
 
@@ -145,30 +135,60 @@ HEARD:
 
 KEYS ALREADY PRESSED ON THIS CALL: {json.dumps(presses)}
 
-Decide whether the other end is an automated phone menu (IVR) and what to do.
+LATEST LINE (judge this one; the lines before it are only context for what
+was already said / pressed): {json.dumps(heard[-1] if heard else "", ensure_ascii=False)}
+
+Decide who is speaking in the LATEST line and what Anne should do.
+
+"speaker":
+- "menu" = an automated phone system that offers choices or collects input:
+  department options, "for X press N", extension / directory / dial-by-name
+  prompts, hold or transfer announcements ("please stay on the line", "your call
+  is being transferred"), language selection.
+- "person" = a live human is talking now: answering the phone, giving a company
+  or own name, asking how they can help or who is calling, replying to Anne -
+  EVEN IF earlier lines were a menu and a key was pressed (the menu has now
+  connected to a person, e.g. the operator).
+- "voicemail_greeting" = a RECORDED answering message for ONE person or business
+  mailbox, i.e. the call was not answered live. Signs: "you have reached ...",
+  "is not available / can't take your call", "leave a message (after the
+  tone/beep)", "record your message", "the message is not recorded, go ahead",
+  "forwarded to an automated voice messaging system", "mailbox is full / not set
+  up", "subscriber unavailable". Judge by MEANING, not keywords: a mailbox greeting
+  that says "press pound / press 1 / hang up when you are finished" is STILL a
+  voicemail greeting - those are recording-end instructions, not a department menu.
+  A menu, by contrast, offers several routes to different people or departments.
+- "unclear" = cannot tell yet (cut off, noise, a lone fragment).
 
 Rules:
-- is_ivr = false if a real person is talking, or it is a voicemail
-  greeting/recording. Then action = "none".
-- GOAL 1: reach a live person. Choose the option for an operator,
-  representative, receptionist, customer service, sales, or general
-  inquiries (including "press 0 for an operator"). Avoid automated options
-  (hours, directions, balances, payments, "press 1 for English" is fine only
-  as a language step if it is the only thing offered).
-- GOAL 2: only if no option reaches a person, choose an option to leave a
-  message / voicemail.
-- If neither exists in a menu that has been fully read out, action = "hangup".
-- If the menu seems unfinished (more options likely coming, or only an
-  intro like "Thank you for calling") and nothing suitable has been heard
-  yet, action = "wait".
-- action = "press" requires digit to be a single key from 0-9, * or #.
-- Do not press a key that is already in KEYS ALREADY PRESSED unless the
-  menu is clearly a different, new menu.
-- If the system asks for an account number, PIN, or anything Anne cannot
-  provide with a single key, action = "hangup".
+- speaker person or voicemail_greeting -> is_ivr = false. For voicemail_greeting
+  action = "voicemail"; for person action = "none".
+- speaker menu -> is_ivr = true, then choose the action that gets Anne to a LIVE
+  PERSON:
+  - Prefer an option that clearly names a person: operator, receptionist,
+    representative, customer service/care, sales, general inquiries.
+  - PRESS 0 WHEN NOTHING BETTER IS OFFERED. Pressing 0 reaches an operator or
+    receptionist in most phone systems, so it is the default escape hatch: use it
+    when the menu has no live-person option, when it only lists automated or
+    unrelated departments, or at an extension / directory / name prompt ("enter
+    the extension... otherwise press 0"). Press 0 once per menu level rather than
+    hanging up. If 0 is already in KEYS ALREADY PRESSED for this menu, try another
+    live-person option or a voicemail option instead.
+  - Avoid automated options (hours, directions, balances, payments, "press 1 for
+    English" only as a language step if nothing else is offered).
+  - GOAL 2: only if no live-person route exists, choose an option to leave a message.
+  - If the menu seems unfinished (more options likely coming, or only an intro
+    like "Thank you for calling") and nothing suitable has been heard yet,
+    action = "wait". Do not wait once a full menu has been read.
+  - action = "hangup" only if the system needs an account number, PIN or anything
+    Anne cannot give with one key, or nothing can reach a person or a mailbox.
+  - action = "press" requires digit to be a single key from 0-9, * or #.
+  - Do not press a key that is already in KEYS ALREADY PRESSED unless the menu is
+    clearly a different, new menu.
+- speaker unclear -> is_ivr = true, action = "wait".
 
 Return ONLY JSON:
-{{"is_ivr": true|false, "action": "press"|"wait"|"hangup"|"none", "digit": "", "target": "representative"|"voicemail"|"", "reason": "short"}}
+{{"speaker": "menu"|"person"|"voicemail_greeting"|"unclear", "is_ivr": true|false, "action": "press"|"wait"|"hangup"|"voicemail"|"none", "digit": "", "target": "representative"|"voicemail"|"", "reason": "short"}}
 """
     response = _get_client().models.generate_content(
         model=MODEL,
@@ -209,18 +229,15 @@ def ivr_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             return {"ivr": ivr, "ivr_result": {"is_ivr": False, "action": action}}
         return not_ivr
 
-    # 2026-10-29: after we pressed a key, a person greeting ("how can I help
-    # you?") ends menu mode at once, and any other non-menu line is judged on
-    # its own - the stale menu text in the heard window made the classifier
-    # keep saying "menu" and Anne stayed silent on a live operator.
-    if text and ivr["active"] and ivr["presses"] and not looks_like_ivr(text):
-        if _HUMAN_GREETING.search(text):
-            return _no_longer_ivr()
-        ivr["heard"] = []
-
     # Gate: skip the LLM unless this sounds like a menu, or the previous
     # turn already was one (menus arrive in pieces).
-    if not text or not (ivr["active"] or looks_like_ivr(text)):
+    # ORIGINAL gate (kept as the ANNE_LLM_IVR=0 behaviour):
+    #   if not text or not (ivr["active"] or looks_like_ivr(text)): ...
+    if LLM_IVR:
+        run_llm = bool(text) and (ivr["active"] or not state.get("human_confirmed"))
+    else:
+        run_llm = bool(text) and (ivr["active"] or looks_like_ivr(text))
+    if not run_llm:
         return _no_longer_ivr() if text else not_ivr
 
     ivr["heard"] = (ivr["heard"] + [text])[-HEARD_WINDOW:]
@@ -229,11 +246,26 @@ def ivr_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     try:
         verdict = _classify(ivr["heard"], ivr["presses"])
     except Exception:
-        # Looks like a menu but the classifier failed: stay silent, keep
-        # listening (the turn cap below still ends the call eventually).
-        verdict = {"is_ivr": True, "action": "wait", "digit": "", "target": ""}
+        # Classifier failed: fall back to the old keyword lists. A menu -> stay
+        # silent and keep listening (the turn cap below still ends the call);
+        # a voicemail phrase -> voicemail; anything else -> treat as a person.
+        if looks_like_ivr(text) or ivr["active"]:
+            verdict = {"speaker": "menu", "is_ivr": True, "action": "wait", "digit": "", "target": ""}
+        elif looks_like_voicemail(text):
+            verdict = {"speaker": "voicemail_greeting", "is_ivr": False, "action": "voicemail"}
+        else:
+            verdict = {"speaker": "person", "is_ivr": False, "action": "none"}
 
-    if not verdict.get("is_ivr"):
+    # A recorded mailbox greeting (even one that says "press pound when finished"):
+    # leave the fixed voicemail message. call.py flags the session as voicemail so
+    # the stream waits for the beep.
+    if verdict.get("speaker") == "voicemail_greeting" or verdict.get("action") == "voicemail":
+        ivr["active"] = False
+        return {"ivr": ivr, "ivr_result": {"is_ivr": False, "action": "voicemail", "voicemail_greeting": True}}
+
+    # A person (e.g. the operator we just reached): _no_longer_ivr() restarts the
+    # whole tested workflow from the opening line if we had been navigating a menu.
+    if not verdict.get("is_ivr") or verdict.get("speaker") == "person":
         return _no_longer_ivr()
 
     ivr["active"] = True

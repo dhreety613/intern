@@ -4,23 +4,12 @@ from call_agent.app.agents.calibration_guide import (
     handle_guidance_turn,
     start_walkthrough,
 )
-from call_agent.app.agents.ivr_agent import looks_like_ivr
+from call_agent.app.agents.ivr_agent import LLM_IVR, looks_like_ivr
 from call_agent.app.agents.voicemail_agent import (
     VOICEMAIL_MESSAGE,
     looks_like_voicemail,
 )
 from call_agent.app.graph.graph import call_graph, start_graph
-
-import re
-
-_RECORD_CUE = re.compile(r"after the (?:tone|beep)|record your message|leave (?:a|your) message|message is not recorded", re.I)
-_POUND_CUE = re.compile(r"pound|hash key|hang up|when (?:you(?:'re| are| have)? )?finished", re.I)
-_MENU_OPTION = re.compile(r"press\s+(?:\d|zero|one|two|three|four|five|six|seven|eight|nine)\b", re.I)
-
-
-def _is_pound_greeting(text: str) -> bool:
-    """Voicemail greeting whose only 'press' is pound / hang-up, not a menu option."""
-    return bool(_RECORD_CUE.search(text) and _POUND_CUE.search(text) and not _MENU_OPTION.search(text))
 
 
 class CallSession:
@@ -159,12 +148,10 @@ class CallSession:
         # Voicemail phrase check - only until a human is confirmed. IVR menus
         # say "to leave a message, press 2": that is a menu, not a greeting.
         if (
-            not self.state.get("human_confirmed")
+            not LLM_IVR  # 2026-10-29: with LLM_IVR on, the IVR agent decides voicemail vs menu vs person
+            and not self.state.get("human_confirmed")
             and looks_like_voicemail(user_message)
-            # ORIGINAL: and not looks_like_ivr(user_message)
-            # 2026-10-29 (Cherokee Brick): "...after the tone ... press the pound key
-            # when finished" is a voicemail greeting, not a menu.
-            and (not looks_like_ivr(user_message) or _is_pound_greeting(user_message))
+            and not looks_like_ivr(user_message)
         ):
             self.add_message("user", user_message)
             self.add_message("assistant", VOICEMAIL_MESSAGE)
@@ -247,6 +234,11 @@ class CallSession:
         # below is then the scripted opening.
         if result.get("ivr_result", {}).get("action") == "restart":
             self._restart_conversation()
+
+        # The IVR agent heard a recorded mailbox greeting (Cherokee Brick, 2026-10-29):
+        # flag voicemail so the stream waits for the beep before the fixed message.
+        if result.get("ivr_result", {}).get("voicemail_greeting"):
+            self.state["is_voicemail"] = True
 
         # A person has answered the name question (or the flow has moved
         # past it): stop looking for voicemail phrases.
