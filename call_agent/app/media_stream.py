@@ -238,6 +238,16 @@ class TwilioMediaStream:
             self._cancel_wait_timeout()
             if self._watchdog_task:
                 self._watchdog_task.cancel()
+            # 2026-10-29: a carrier recording ("mailbox is full...") hangs up right
+            # after speaking, so its transcription can still be in flight when the
+            # stream closes (Jim May, 2026-10-28). Give it up to 3 s so is_voicemail
+            # is set before CALL_END / the result are built.
+            for _ in range(30):
+                if not self._processing:
+                    break
+                await asyncio.sleep(0.1)
+            if any("mailbox" in t.lower() and "full" in t.lower() for t in self._transcript):
+                self._track("MAILBOX_FULL", note="voicemail box full - message could not be left")
             self._track_end()
             if self._voicemail_key_task:
                 self._voicemail_key_task.cancel()

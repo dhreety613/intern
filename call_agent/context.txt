@@ -545,3 +545,12 @@ OPERATOR RULE (app/agents/ivr_agent.py + one log line in app/media_stream.py), a
  4) new log: TRACK | IVR_DECISION | action, digit, target, reason, heard  (decision['ivr_log'] -> media_stream).
 Tested locally with a stubbed classifier (Luis Espinosa's menu: 'customer care, press one' -> presses 1; 6 waits -> presses 0).
 Revert: git revert the commit.
+
+2026-10-28/29 BATCH 2 (20 more real customers, 19:21-20:27 UTC): 9 voicemail left, 10 no conversation, 1 no pickup, 0 live humans.
+ Operator rule deployed (7c0d7ce) but never triggered a press. Open flags: Jim May voicemail detected but message not left; Vince Patterson silent 130 s after "unavailable".
+ Batch 3 = next 20 eligible (see present.txt). monitor.py can die if the PC sleeps - rebuild present.txt from render_logs --hours 12 if so.
+
+2026-10-29 FIX (Jim May, deal 40314, CA...d63377): carrier said "mailbox ... is full and cannot accept new messages" and hung up after 7 s; the
+ transcript landed 1 s AFTER the stream closed, so CALL_END/result said voicemail=False (no_conversation). Fix (app/media_stream.py handle() finally):
+ wait up to 3 s for an in-flight turn (self._processing) before _track_end, and log TRACK | MAILBOX_FULL if a mailbox-full phrase is in the transcript.
+ The message itself can't be left (box full). Revert: git revert the commit.
