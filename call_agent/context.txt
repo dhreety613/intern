@@ -554,3 +554,90 @@ Revert: git revert the commit.
  transcript landed 1 s AFTER the stream closed, so CALL_END/result said voicemail=False (no_conversation). Fix (app/media_stream.py handle() finally):
  wait up to 3 s for an in-flight turn (self._processing) before _track_end, and log TRACK | MAILBOX_FULL if a mailbox-full phrase is in the transcript.
  The message itself can't be left (box full). Revert: git revert the commit.
+
+2026-10-29 BATCH 3 scheduled: n8n xXCNl3KCV0NIv4g3 fires once at 13:00 UTC 2026-10-29 (cron 0 13 29 10 *), 27 remaining eligible customers
+ (the 100-queue had only 29 left after skips; dropped 'retired' David Ormsby and Alberta-based Martin Musial), East->West, 2 min gaps. Pipedrive cards untouched.
+ To cancel: deactivate that workflow. Deploy 359328a (Jim May fix) is live.
+
+2026-10-29 QUEUE RULES UPDATED + BATCH 4 (60 customers) SCHEDULED
+Clean queue code (n8n 'anne - queue (20) preview' o0DCfZ0rrKZRD3nD, also the temp export copy gPzhEXYnQyu2uJmM) now has rule 7 on top of rules 1-6:
+ 7a needs serial + due date | 7b US phone only (NANP, extensions ok) | 7c skip 'no longer/retired/left the company/deceased' | 7d skip non-US company (country words, Canadian provinces)
+ 7e skip Canadian + Caribbean +1 area codes | skip list: deal 43776 (internal test contact). Under these rules the queue has 300+ eligible (export capped at 300).
+Batch 3 (xXCNl3KCV0NIv4g3, 27 calls) fires 2026-10-29 13:00 UTC. Batch 4 (GGsL0L25g704DOg7, 60 calls, cron 0 13 30 10 *): 20 calls with 2 min gaps,
+ 5 min break, 20, 5 min break, 20; East->West. Excludes everyone in batches 1-3 (by deal and person). 175 untried eligible remain after it.
+BATCH 4 QUEUE (#|deal|person|name|phone|serial|due|org):
+01|38825|22958|Niall Breedlove|+15745831809|4702-SX|2026-10-26|Ball - Monticello, IN
+02|37762|11645|John Nickel|+19737247299|951-IX|2026-10-05|U.S. Army - Picatinny Arsenal, NJ
+03|37761|1441|William Shaw|+14138639402 x481|304-XD|2026-10-19|Judd Wire Inc - Turners Falls, MA
+04|37718|13570|Corey Burnard|14845097011|2547-SX|2026-10-15|Canpack - Olyphant, PA
+05|37392|14063|Pat Hayes|5136159347|286-XD|2026-10-06|Meyer Tool - Cincinnati, OH
+06|37390|4421|Pam Ratcliff|+12193074526|4749-SX|2026-11-13|Pratt Industries - Valparaiso, IN
+07|36415|14042|Dolly Teasley|7067765441|235-XD|2026-11-13|Turtle & Hughes - Cornelia, GA
+08|36403|12128|Carrie Wessel|3172934100|4793-SX|2026-11-11|C&R Racing/ PWRNA Indianapolis, IN
+09|36206|12123|Tharun Kumar Sivasankar|+15743788743|4794-SX|2026-11-12|O-I - Lapel, IN
+10|35504|11532|Slade Paschal|6787679245|4781-SX|2026-11-04|Pine Hall Brick - Madison, NC
+11|35470|7213|Christopher Plunk|+17314341242|4722-SX|2026-10-14|GE Appliances/Monogram Refrigeration - Selmer, TN
+12|35392|10167|Zach Hinderman|+13093707706|4746-SX|2026-11-11|O-I - Lapel, IN
+13|35168|1596|Kevin Breidenbach|+14198190543|4685-SX|2026-10-15|First Solar - Perrysburg, OH
+14|34210|6036|Alberto Alicea|+12038418285|177-XD|2026-10-01|Accel International - Meriden, CT
+15|33454|5063|Jay Bellis|5852706926|I-378|2026-01-30|Transcat - Rochester, NY
+16|33142|997|Michael Chekan|5702077000|I-074|2026-11-06|Advanced Textile Composites - Scranton, PA
+17|33128|22477|Ronald Marbach|+12603992127|I-042|2026-10-29|Fort Wayne Metals - Fort Wayne, IN
+18|33122|8712|Kenneth Warnock|978-836-9150|I-025|2026-11-27|Medtronic - Danvers, MA
+19|33036|9102|Ed Lewis|+16077491516|H-927|2026-02-05|Albany International - Homer, NY
+20|32998|10|Daniel Sanchez|3152454305 ext253|H-860|2026-02-03|IWG - Camden, NY
+21|32952|3899|Dustin Kondelis|+18024639558 x1195|H-835|2026-02-05|Whitney Blake - Bellows Falls, VT
+22|32882|2337|Tom Gilley|7068475753|H-573|2026-01-28|M & M Fibers - Dalton, GA
+23|32843|4986|Richard (Rick) Mathieu|(+1) 508-673-3307 ext. 107|H-021|2026-01-29|E Y Technologies - Fall River, MA
+24|32828|3504|Blaine Harvey|+1 518-842-3090|H-270|2026-01-26|Mohawk - Amsterdam, NY
+25|32678|4814|George Miller|203-948-5310|F-791|2026-11-05|Barden Corporation - Danbury, CT
+26|32673|7805|Steve Fortner|8659827000 x2674|F-779|2026-11-04|Denso - Athens, TN
+27|32658|16164|Kevin Dray|7167315062|F-543|2026-10-12|Voss Manufacturing - Sanborn, NY
+28|32660|4235|Randy Banasiak|5183877954|F-457|2026-10-09|GE Global Research - Niskayuna, NY
+29|32652|5129|Bill Pochron|5742676041|F-269|2026-10-05|Warsaw Coil Company - Warsaw, IN
+30|32653|13243|Brian Long|+1 267-956-1276|F-341|2026-10-07|Fiber-Line - Hatfield, PA
+31|37778|12236|Ramiro Pena|9564432085|303-XD|2026-10-22|Trico Products - Brownsville, TX
+32|37741|3001|Anissa Gonzalez|618-258-4721|961-IX|2026-10-02|West Star Aviation - East Alton, IL
+33|36625|6344|George Jackson|318-354-4057|1813-SX|2026-11-04|Weyerhaeuser - Natchitoches, LA
+34|36372|7638|Andrew Wolf|+18324263966|4719-SX|2026-10-06|Crown Canlines - Houston, TX
+35|36207|11811|Caitlin Peterson|9205859030|4787-SX|2026-11-06|Boston Scientific
+36|35509|11014|Alex Biser|2028742279|4779-SX|2026-10-30|BEP Bureau of Engraving and Printing
+37|35349|3032|Arnulfo Lozano|(81) 83728921|4723-SX|2026-10-15|Productos y Controles del Norte / Proconsa
+38|35348|5860|Gregory Clemons|+16016507288|4740-SX|2026-11-09|Weyerhaeuser - Philadelphia
+39|34954|5540|Francis Poplawski|+1 972-344-5918|23628|2026-11-17|OPNAV SDC - Dallas, TX
+40|33436|13937|Simon Wong|+16306165900|I-372|2026-01-28|MC Machinery - Elk Grove Village, IL
+41|33131|17088|Jose Hurtado|5202811507|I-049|2026-11-02|Metrology & Design Engineering
+42|33120|4713|Thomas Kochert|(503) 925-1942 x 104|I-023|2026-11-26|Ascentec Engineering
+43|33114|4945|Keith St. John|302-834-2100|I-017|2026-11-24|Rogers Corporation
+44|33109|7791|Diego Trevino|972-352-2355|I-008|2026-11-20|Condumex - Laredo, TX
+45|33028|14853|Ashley Nelson|(651) 424-0035|H-922|2026-10-15|Fox Valley Metrology - Stacy, MN
+46|32950|12894|Jennifer Piersall|(315)245-3800 Ext. 246|H-779|2026-02-04|IWG - El Paso, TX
+47|32915|4872|Guadalupe/Lupita Rodriguez|956-630-4310  X161|H-710|2026-01-27|Wells Vehicle Electronics
+48|32833|13157|Kimberly Curless|6083739264|H-318|2026-01-28|SSI Technologies, LLC
+49|32688|11284|Scott Schmidt|(800) 873-4528|F-983|2026-11-19|Great Lakes Custom Tool - Peshtigo, WI
+50|32682|4916|Joerg Quasniczka|865.457.3800|F-907|2026-11-12|Magna - Eagle Bend Manufacturing
+51|32679|5192|Peter Kendler|847-634-6900|F-851|2026-11-09|Central Machines
+52|32680|4327|Peter DesJardins|401-828-7600|F-896|2026-11-10|Guill Tool & Engineering Co
+53|37783|3704|Devin Bjorneboe|9706861500|344-SX|2026-10-23|Metal Container - Windsor, CO
+54|37775|12939|Jayc Johnson|(801)-644-6231|570-IX|2026-10-21|Edwards Lifesciences - Draper, UT
+55|34317|5896|Mike Wray|7207221068|375-IX|2026-11-13|Frontier Airlines - Denver, CO
+56|37803|13196|Kevin King|9093508416|3747-SX|2026-10-26|Ring Container - Fontana, CA
+57|37687|11365|Linh Tran|503-454-7049|302-XD|2026-10-13|Samtec - Wilsonville, OR
+58|37443|9744|Andrew Roundy|8015655302|291-XD|2026-10-07|Edwards Lifesciences - Irvine, CA
+59|36405|10620|Theresa Justice|334-465-9877|4786-SX|2026-11-05|KW Container - Bakersfield, CA
+60|35215|14406|Bryan Duran|+17075644204|476-IX|2026-11-20|Icon Aircraft - Vacaville, CA
+
+================================================================
+CHANGELOG 2026-10-29  (batch 3 results + 3 IVR/voicemail fixes)
+================================================================
+Batch 3 (27 customers, 13:00-14:27 UTC, n8n xXCNl3KCV0NIv4g3): 23 connected - 15 voicemail, 1 LIVE HUMAN (Gary Findley, Falcon Crest Aviation: asked for a rep, Anne redirected
+ to the rep line = first real conversation), 2 phone menus, 5 silent/short; 4 never connected (Mangiafico, Diestelkamp, Landrus, Lugo).
+OPERATOR RULE CONFIRMED LIVE: Brampton Brick (Daniel Egge) and WireCo (Luis Espinosa) - "customer service/care press one" -> Anne pressed 1; DCI Hollow Metal reached its operator.
+Three problems found and fixed (ivr_agent.py, call.py):
+ 1) DCI Hollow Metal (deal 39001): after pressing 1 the operator answered "DCI, how can I help you?" but Anne stayed silent (stale menu text in the classifier window kept saying
+    'menu'). Fix: after a key was pressed, a "how can I help / may I help" greeting ends menu mode (action restart -> Anne opens), and non-menu lines are classified alone (heard window cleared).
+ 2) Cherokee Brick (deal 38917): extension voicemail "...leave a message after the tone... press the pound key" was treated as a menu, so Anne never left her message (116 s).
+    Fix: call.py _is_pound_greeting(): record cue + pound/hang-up cue + no 'press <digit>' = voicemail greeting.
+ 3) WireCo (deal 39796): after pressing 1 -> "enter the extension... otherwise press zero" -> Anne hung up. Fix: 'otherwise ... press zero' => press 0; rule 1 may now press a second,
+    different live-person key (was: only before any key had been pressed).
+Hickenbottom (deal 38144): carrier said voicemail box not set up -> nothing to leave; now correctly recorded as voicemail (Jim May fix).

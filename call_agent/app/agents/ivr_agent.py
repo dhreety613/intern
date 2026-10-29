@@ -79,6 +79,20 @@ _DIGIT_WORDS = {
     "star": "*", "pound": "#", "hash": "#",
 }
 _DIGIT = r"(\d|zero|one|two|three|four|five|six|seven|eight|nine|star|pound|hash)"
+# 2026-10-29 (WireCo): after "enter the extension ... otherwise press zero" the
+# operator is behind 0.
+_ZERO_FALLBACK = re.compile(
+    r"(?:otherwise|if you (?:do not|don't) know)[^.]{0,80}?\bpress\s+(zero|0)\b", re.I
+)
+
+# 2026-10-29 (DCI Hollow Metal): once we have pressed a key, a greeting like
+# "DCI, how can I help you?" means a person picked up.
+_HUMAN_GREETING = re.compile(
+    r"\b(how (?:can|may) (?:i|we) (?:help|direct|assist)|can i help you|may i help you|"
+    r"what can i do for you)\b",
+    re.I,
+)
+
 _LIVE_PRESS = [
     re.compile(rf"(?:{_LIVE_WORDS})[^.]{{0,40}}?\b(?:press|dial)\s+{_DIGIT}\b", re.I),
     re.compile(rf"\b(?:press|dial)\s+{_DIGIT}\b[^.]{{0,20}}?\bfor\b[^.]{{0,25}}?(?:{_LIVE_WORDS})", re.I),
@@ -92,6 +106,9 @@ def find_live_person_key(text: str) -> str:
         if m:
             tok = m.group(1).lower()
             return _DIGIT_WORDS.get(tok, tok)
+    m = _ZERO_FALLBACK.search(text or "")
+    if m:
+        return "0"
     return ""
 
 
@@ -192,6 +209,15 @@ def ivr_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             return {"ivr": ivr, "ivr_result": {"is_ivr": False, "action": action}}
         return not_ivr
 
+    # 2026-10-29: after we pressed a key, a person greeting ("how can I help
+    # you?") ends menu mode at once, and any other non-menu line is judged on
+    # its own - the stale menu text in the heard window made the classifier
+    # keep saying "menu" and Anne stayed silent on a live operator.
+    if text and ivr["active"] and ivr["presses"] and not looks_like_ivr(text):
+        if _HUMAN_GREETING.search(text):
+            return _no_longer_ivr()
+        ivr["heard"] = []
+
     # Gate: skip the LLM unless this sounds like a menu, or the previous
     # turn already was one (menus arrive in pieces).
     if not text or not (ivr["active"] or looks_like_ivr(text)):
@@ -223,9 +249,11 @@ def ivr_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     reason = verdict.get("reason", "")
 
     # Operator rule 1: press a named live-person option at once.
-    if action != "press" and not ivr["presses"]:
+    if action != "press" and len(ivr["presses"]) < MAX_PRESSES:
         live_key = find_live_person_key(text)
-        if live_key:
+        # ORIGINAL condition: only before any key was pressed. Now a key that was
+        # not pressed yet may follow (e.g. 1 for customer care, then 0 at the extension prompt).
+        if live_key and live_key not in ivr["presses"]:
             action, digit, target, reason = "press", live_key, "representative", "operator rule: live-person option heard"
 
     if action == "wait":

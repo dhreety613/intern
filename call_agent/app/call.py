@@ -11,6 +11,17 @@ from call_agent.app.agents.voicemail_agent import (
 )
 from call_agent.app.graph.graph import call_graph, start_graph
 
+import re
+
+_RECORD_CUE = re.compile(r"after the (?:tone|beep)|record your message|leave (?:a|your) message|message is not recorded", re.I)
+_POUND_CUE = re.compile(r"pound|hash key|hang up|when (?:you(?:'re| are| have)? )?finished", re.I)
+_MENU_OPTION = re.compile(r"press\s+(?:\d|zero|one|two|three|four|five|six|seven|eight|nine)\b", re.I)
+
+
+def _is_pound_greeting(text: str) -> bool:
+    """Voicemail greeting whose only 'press' is pound / hang-up, not a menu option."""
+    return bool(_RECORD_CUE.search(text) and _POUND_CUE.search(text) and not _MENU_OPTION.search(text))
+
 
 class CallSession:
 
@@ -150,7 +161,10 @@ class CallSession:
         if (
             not self.state.get("human_confirmed")
             and looks_like_voicemail(user_message)
-            and not looks_like_ivr(user_message)
+            # ORIGINAL: and not looks_like_ivr(user_message)
+            # 2026-10-29 (Cherokee Brick): "...after the tone ... press the pound key
+            # when finished" is a voicemail greeting, not a menu.
+            and (not looks_like_ivr(user_message) or _is_pound_greeting(user_message))
         ):
             self.add_message("user", user_message)
             self.add_message("assistant", VOICEMAIL_MESSAGE)
