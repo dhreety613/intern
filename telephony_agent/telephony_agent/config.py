@@ -49,9 +49,9 @@ class Settings:
     human_fallback_s: float = _f("HUMAN_FALLBACK_S", 1.2)
     music_hold_s: float = _f("MUSIC_HOLD_S", 4.0)
 
-    # dtmf: 'inband' = tones over the media stream (what call_agent does live; default);
-    #       'twilio' = REST <Play digits> + stream reconnect
-    dtmf_mode: str = os.getenv("DTMF_MODE", "inband")
+    # dtmf: "twilio" (default) = Twilio generates the tones: REST <Play digits> + stream reconnect;
+    #       "inband" = our own tones over the media stream (did NOT register on a live IVR)
+    dtmf_mode: str = os.getenv("DTMF_MODE", "twilio")
     reconnect_window_s: float = _f("RECONNECT_WINDOW_S", 8)
 
     # recording (call_agent records every call, dual channel, for review)
