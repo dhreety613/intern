@@ -151,3 +151,4 @@ class CallRequest:
     call_id: str
     extension: str | None = None            # for "enter extension" prompts
     context: dict = field(default_factory=dict)  # passed through to brain later
+    ring_timeout_s: int | None = None       # per-call override of RING_TIMEOUT_S

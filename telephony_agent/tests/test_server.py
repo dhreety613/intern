@@ -91,7 +91,7 @@ def test_dial_params_and_status_callbacks():
         r = c.post("/calls", json={"to": "+15551230000"}).json()
         cid = r["call_id"]
         body = [b for m, p, b in calls if p.endswith("/Calls.json")][0]
-        assert "AsyncAmd=true" in body and "MachineDetection=DetectMessageEnd" in body and "Timeout=25" in body
+        assert "AsyncAmd=true" in body and "MachineDetection=DetectMessageEnd" in body and "Timeout=40" in body
         c.post(f"/status/{cid}", data={"CallStatus": "ringing"})
         c.post(f"/status/{cid}", data={"CallStatus": "no-answer"})
         out = c.get(f"/calls/{cid}").json()
@@ -210,3 +210,11 @@ def test_inband_mode_still_available():
                 total += len(base64.b64decode(m["media"]["payload"]))
             assert total == 960
             assert not any("Twiml" in b for _, _, b in calls)
+
+
+def test_per_call_ring_timeout_override():
+    calls = []
+    with TestClient(make(calls)) as c:
+        c.post("/calls", json={"to": "+15551230000", "ring_timeout_s": 7})
+        body = next(b for _, p, b in calls if p.endswith("/Calls.json"))
+        assert "Timeout=7&" in body or body.endswith("Timeout=7")

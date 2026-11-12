@@ -20,7 +20,7 @@ def build_call_params(req: CallRequest, to_e164: str, s: Settings) -> dict:
         "From": s.from_number,
         "Url": f"{base}/twiml/{req.call_id}",
         "Method": "POST",
-        "Timeout": str(s.ring_timeout_s),                    # ring timeout -> no-answer
+        "Timeout": str(req.ring_timeout_s or s.ring_timeout_s),                    # ring timeout -> no-answer
         "StatusCallback": f"{base}/status/{req.call_id}",
         "StatusCallbackMethod": "POST",
         "StatusCallbackEvent": ["initiated", "ringing", "answered", "completed"],

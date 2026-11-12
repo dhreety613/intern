@@ -17,7 +17,7 @@ class Settings:
     public_base_url: str = field(default_factory=lambda: os.getenv("PUBLIC_BASE_URL", "").rstrip("/"))
 
     # dialing
-    ring_timeout_s: int = int(os.getenv("RING_TIMEOUT_S", 25))
+    ring_timeout_s: int = int(os.getenv("RING_TIMEOUT_S", 40))
     amd_timeout_s: int = int(os.getenv("AMD_TIMEOUT_S", 30))
     block_landline_voip_check: bool = False
     lookup_enabled: bool = os.getenv("LOOKUP_ENABLED", "1") == "1"

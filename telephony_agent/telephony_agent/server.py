@@ -31,6 +31,7 @@ class DialBody(BaseModel):
     to: str
     extension: str | None = None
     context: dict = {}
+    ring_timeout_s: int | None = None
 
 
 def twilio_signature(auth_token: str, url: str, params: dict) -> str:
@@ -132,7 +133,8 @@ def create_app(settings: Settings | None = None, *, stt_factory: Callable[[], ST
     async def start_call(body: DialBody, x_api_key: str = Header(default="")):
         if key and not hmac.compare_digest(key, x_api_key):
             raise HTTPException(401)
-        req = CallRequest(to=body.to, call_id=uuid.uuid4().hex[:12], extension=body.extension, context=body.context)
+        req = CallRequest(to=body.to, call_id=uuid.uuid4().hex[:12], extension=body.extension, context=body.context,
+                          ring_timeout_s=body.ring_timeout_s)
         sess = CallSession(req, s, stt_factory=stt_factory, tts=tts, hangup=_hangup, send_dtmf=_dtmf_fn(req.call_id), llm=llm,
                            on_handoff=_handoff_stub)
         sessions[req.call_id] = sess

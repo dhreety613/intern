@@ -1,0 +1,78 @@
+PENDING TESTS - telephony agent (as of 2026-11-13)
+=================================================
+
+Live service: https://fetch-history-e22w.onrender.com/telephony-agent   (POST /calls, GET /calls/{id}, header X-API-Key)
+Plan: user supplies a spare Twilio number. We add scripted "scenario line" TwiML endpoints, point that number's
+voice webhook at one scenario at a time, dial it with the agent, and check GET /calls/{id} for the expected outcome.
+
+ALREADY VERIFIED LIVE
+---------------------
+[x] Ringing: silent, no handoff
+[x] IVR (+13464876828): full menu parsed, team priority (engineering first) pressed, Twilio DTMF works,
+    last words before hangup captured ("voicemail for the engineering department")
+[x] Standard voicemail (user's iPhone): greeting + beep detected, message spoken, hangup -> voicemail_left
+[x] Human answer: "hello" confirmed (text + rhythm), silence -> "Hello?" probe -> reply confirmed
+[x] Decline on user's carrier: carrier answers then drops -> logged remote_hangup (no true Twilio "busy")
+
+TO TEST (one at a time, on the Twilio scenario line unless noted)
+-----------------------------------------------------------------
+Call progress
+[ ] 1. Genuine busy             TwiML <Reject reason="busy"/>            expect outcome=busy, retryable
+[ ] 2. True no-answer           needs the unpushed per-call ring_timeout_s (local edit, not deployed);
+                                dial user's phone with ring_timeout_s=7  expect outcome=no_answer
+[ ] 3. Invalid number           (a) bogus number caught by Twilio Lookup before dialing
+                                (b) number Twilio rejects (21211 etc)    expect outcome=invalid_number
+[ ] 4. Busy / reorder tone      TwiML plays 480+620 Hz on/off cadence    expect busy_tone verdict -> busy/unreachable
+[ ] 5. Fax tone                 1100 Hz CNG / 2100 Hz CED                expect fax -> invalid_number
+
+Carrier messages (spoken by TwiML <Say>)
+[ ] 6. "The number you have dialed is not in service"          expect invalid_number
+[ ] 7. "The number has been disconnected / no longer in service" expect disconnected
+[ ] 8. "Subscriber not available / switched off / out of coverage" expect unreachable
+
+Call screening
+[ ] 9.  Screening prompt "state your name and reason after the tone" + beep -> Anne speaks screening line after beep
+[ ] 10. Screening prompt with no beep (silence fallback after ~2 s)
+[ ] 11. Screening rejection "person is not available / declined your call" -> screened_out
+
+Voicemail variants
+[ ] 12. Mailbox full             expect voicemail_full (hang up, NO message, retryable)
+[ ] 13. Mailbox disabled / not set up   expect voicemail_disabled (hang up, no message)
+[ ] 14. Voicemail greeting WITHOUT a beep (AMD end-silence path)  message still left
+[ ] 15. Personal greeting that starts like a person ("Hi, this is John, leave a message") must NOT be confirmed human
+
+Hold
+[ ] 16. "Please hold" phrase     expect hold state, silent, no handoff
+[ ] 17. Hold music only (no words, 4+ s)  expect hold via music detector
+[ ] 18. Hold then live person answers -> human confirmed
+[ ] 19. 10-minute hold cap -> hold_timeout (can shorten HOLD_MAX_S via env for the test)
+
+IVR extras
+[ ] 20. Menu with no person option  -> press 0 -> then "leave a message" option -> else ivr_failed
+[ ] 21. "Invalid entry" re-prompt   -> retry / fallback ladder
+[ ] 22. Extension prompt  (with and without "extension" in the request)
+[ ] 23. Menu repeats after a key press -> fallback
+[ ] 24. IVR press -> live person answers -> human confirmed (restart detection after menu)
+[ ] 25. Speech IVR ("say representative")
+[ ] 26. Multi-level IVR (second menu after the first key)
+
+Human guard
+[ ] 27. Long unbroken speech (voicemail-style) must NOT be confirmed as human while still talking
+[ ] 28. Dead air: answered, total silence 20 s -> failed (no activity); AMD=human + silence -> still human
+
+Misc
+[ ] 29. Result webhook (CALL_RESULT_WEBHOOK_URL) delivered with outcome at call end
+[ ] 30. Transcription lag: IVR menu not acted on until the full menu is transcribed (verified once, recheck on long menus)
+
+KNOWN NOTES / FOLLOW-UPS
+------------------------
+- Local, NOT pushed: per-call ring_timeout_s on POST /calls (models.py, dialer.py, server.py, main.py build marker ivr-fix-7).
+- User's iPhone carrier forwards unanswered calls to voicemail at ~11-24 s; RING_TIMEOUT_S default is 25 s (voicemail
+  answered at 24 s once) -> consider raising RING_TIMEOUT_S to ~40 on Render.
+- Declining a call on that carrier is "answered then dropped after ~3 s", not a Twilio busy status. Optional heuristic:
+  answered + no speech + hangup < 5 s => treat as declined/busy. Not implemented; decide later.
+- Scribe STT adds ~1-2 s lag before text-based decisions; consider streaming STT for stage 2 (brain replies).
+- Handoff to brain is still the stub (log, hold 6 s, hang up). Stage 2 (reason codes: hold / transfer to IVR / voicemail /
+  transfer to rep, re-run detection, fresh greeting) is not built.
+- Render redeploys wipe in-memory call records; do not push while a test call is running.
+- "Anne" TTS voice id default is call_agent's (Rachel); confirm ELEVENLABS_VOICE_ID on Render is the intended voice.
