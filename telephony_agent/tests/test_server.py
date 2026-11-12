@@ -131,10 +131,13 @@ def test_end_to_end_voicemail_over_websocket():
             FakeSTT.inst.push("Hi you've reached John, leave a message after the tone.")
             assert wait_for(lambda: c.get(f"/calls/{cid}").json()["state"] == "voicemail")
             c.post(f"/amd/{cid}", data={"AnsweredBy": "machine_end_beep"})
-            m1 = json.loads(ws.receive_text())
-            assert m1["event"] == "media" and m1["streamSid"] == "MZ1"
+            frames = []
             m2 = json.loads(ws.receive_text())
-            assert m2["event"] == "mark"
+            while m2["event"] == "media":                   # paced 20 ms frames of 160 bytes, then the mark
+                assert m2["streamSid"] == "MZ1" and len(base64.b64decode(m2["media"]["payload"])) == 160
+                frames.append(m2)
+                m2 = json.loads(ws.receive_text())
+            assert len(frames) == 10 and m2["event"] == "mark"
             ws.send_text(json.dumps({"event": "mark", "mark": {"name": m2["mark"]["name"]}}))
             assert wait_for(lambda: any(p.endswith("/Calls/CA123.json") and "Status=completed" in b for _, p, b in calls))
             out = c.get(f"/calls/{cid}").json()
@@ -200,6 +203,10 @@ def test_inband_mode_still_available():
             ws.send_text(json.dumps({"event": "start", "start": {"streamSid": "MZ5", "callSid": "CA123"}}))
             assert wait_for(lambda: FakeSTT.inst is not None and hasattr(FakeSTT.inst, "q"))
             FakeSTT.inst.push("For sales, press 1. For calibration services, press 2.")
-            m = json.loads(ws.receive_text())
-            assert m["event"] == "media" and len(base64.b64decode(m["media"]["payload"])) > 800
+            total = 0
+            for _ in range(6):                              # DTMF "1": 250 ms tone + 120 ms gap as 160-byte frames
+                m = json.loads(ws.receive_text())
+                assert m["event"] == "media"
+                total += len(base64.b64decode(m["media"]["payload"]))
+            assert total == 960
             assert not any("Twiml" in b for _, _, b in calls)

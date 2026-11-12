@@ -21,6 +21,7 @@ from .tones import dtmf_mulaw
 log = logging.getLogger("telephony.session")
 FRAME = 160
 TICK_S = 0.25
+TICK_FRAME_S = 0.02
 
 HangupFn = Callable[[str], Awaitable[None]]
 HandoffFn = Callable[["CallSession", HandoffToBrain], Awaitable[None]]
@@ -46,6 +47,7 @@ class CallSession:
         self._tasks: list[asyncio.Task] = []
         self._send_lock = asyncio.Lock()
         self._mark_n = 0
+        self._out_q: asyncio.Queue = asyncio.Queue()
         self.done = asyncio.Event()
         self.status_history: list[str] = []
 
@@ -125,16 +127,37 @@ class CallSession:
             await self.ws.send_text(json.dumps(obj))
 
     async def _send_audio(self, mulaw: bytes) -> None:
+        """Queue audio for the paced sender: 160-byte (20 ms) frames in real time, exactly how call_agent feeds
+        Twilio (big bursts are not reliably played, DTMF tones included). Returns at once; marks keep order."""
         if not mulaw or not self.stream_sid:
             return
-        for i in range(0, len(mulaw), FRAME * 25):
-            payload = base64.b64encode(mulaw[i:i + FRAME * 25]).decode()
-            await self._send_json({"event": "media", "streamSid": self.stream_sid, "media": {"payload": payload}})
+        if len(mulaw) % FRAME:
+            mulaw += bytes([0xFF]) * (FRAME - len(mulaw) % FRAME)   # mu-law silence
+        for i in range(0, len(mulaw), FRAME):
+            self._out_q.put_nowait(("media", mulaw[i:i + FRAME]))
 
     async def _send_mark(self) -> None:
         self._mark_n += 1
-        await self._send_json({"event": "mark", "streamSid": self.stream_sid,
-                               "mark": {"name": f"speech_done_{self._mark_n}"}})
+        self._out_q.put_nowait(("mark", f"speech_done_{self._mark_n}"))
+
+    async def _sender(self) -> None:
+        loop = asyncio.get_running_loop()
+        nxt = loop.time()
+        while True:
+            kind, val = await self._out_q.get()
+            now = loop.time()
+            if nxt < now - 0.1:
+                nxt = now                                      # fell behind / was idle: restart the clock
+            try:
+                if kind == "media":
+                    await self._send_json({"event": "media", "streamSid": self.stream_sid,
+                                           "media": {"payload": base64.b64encode(val).decode()}})
+                    nxt += TICK_FRAME_S
+                    await asyncio.sleep(max(0.0, nxt - loop.time()))
+                else:
+                    await self._send_json({"event": "mark", "streamSid": self.stream_sid, "mark": {"name": val}})
+            except Exception:
+                log.exception("audio sender error")
 
     # ------------------------------------------------------------ websocket
     async def run_media(self, ws) -> None:
@@ -185,6 +208,7 @@ class CallSession:
             return
         if not self.hub.running:
             self.hub.start()
+        self._tasks.append(asyncio.create_task(self._sender(), name="audio-sender"))
         self.stt = self.stt_factory()
         self.hub.fusion.stt_busy = lambda: bool(getattr(self.stt, "busy", False))
         await self.stt.start()
