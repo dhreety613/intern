@@ -16,6 +16,11 @@ _ZERO_ANYTIME = re.compile(r"(?:press|dial)\s+(?:zero|0)\b")
 
 # intent ranking: earlier = better. Matched against option description.
 DEFAULT_TARGETS = [
+    # which TEAM to reach when a menu lists several: engineering, then parts & service, then QA
+    r"\bengineering\b|\bengineers?\b|\btechnical\b|\btech support\b",
+    r"\bparts\b|(?<!customer )\bservice (department|team|and|&)\b|\bparts (and|&) service\b",
+    r"\bq\.? ?a\b|\bquality\b",
+    # then any route to a person
     r"\b(speak|talk)\b.*\b(person|someone|representative|agent|associate|rep)\b",
     r"\bcalibration\b",
     r"\bcustomer (service|support)\b",

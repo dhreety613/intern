@@ -68,8 +68,10 @@ class GeminiFallback:
 
 
 KEY_PROMPT = """You are navigating a phone menu (IVR) on an outbound call. Goal, in strict priority order:
-1. human: the option that reaches a live person (representative, agent, operator, someone, customer service, sales).
-   Prefer the most direct route to a person; never pick payments, hours, directions, languages, repeat.
+1. human: the option that reaches a live person, and the most APPROPRIATE one. If the menu lists several teams or
+   departments, choose by this order: engineering first (also "technical"/"tech support"), else parts and service,
+   else QA / quality, else a calibration, customer service or sales line, else any representative/agent/operator/
+   someone. Prefer the most direct route to a person; never pick payments, hours, directions, languages, repeat.
 2. (handled outside: if no option reaches a person, the caller presses 0)
 3. voicemail: an option to leave a message / voicemail.
 4. none: nothing useful.

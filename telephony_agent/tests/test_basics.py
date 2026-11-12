@@ -69,3 +69,18 @@ def test_dtmf_has_both_tones():
     f = np.fft.rfftfreq(len(pcm), 1 / 8000)
     top = sorted(f[np.argsort(spec)[-2:]])
     assert abs(top[0] - 770) < 25 and abs(top[1] - 1336) < 25
+
+
+def test_ivr_team_priority_engineering_then_parts_service_then_qa():
+    from telephony_agent.ivr import choose_key, parse_options
+    menu = "For sales, press 1. For quality assurance, press 2. For parts and service, press 3. For engineering, press 4."
+    assert choose_key(parse_options(menu)).key == "4"
+    assert choose_key(parse_options("For sales, press 1. For quality assurance, press 2. For parts and service, press 3.")).key == "3"
+    assert choose_key(parse_options("For sales, press 1. For QA, press 2. For billing, press 5.")).key == "2"
+    assert choose_key(parse_options("For sales, press 1. For billing, press 5.")).key == "1"
+
+
+def test_customer_service_is_not_the_parts_service_team():
+    from telephony_agent.ivr import choose_key, parse_options
+    o = parse_options("For customer service and billing, press 1. For quality assurance, press 2.")
+    assert choose_key(o).key == "2"
