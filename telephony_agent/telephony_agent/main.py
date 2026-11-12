@@ -33,7 +33,7 @@ app = create_app(settings, stt_factory=make_stt_factory(), tts=tts, llm=llm)
 
 @app.get("/health")
 def health():
-    return {"service": "telephony-agent", "status": "healthy", "build": "ivr-fix-5"}
+    return {"service": "telephony-agent", "status": "healthy", "build": "ivr-fix-6"}
 
 
 @app.on_event("startup")

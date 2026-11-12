@@ -48,6 +48,7 @@ class CallSession:
         self._send_lock = asyncio.Lock()
         self._mark_n = 0
         self._out_q: asyncio.Queue = asyncio.Queue()
+        self._stt_flushed = False
         self.stats = {"frames_sent": 0, "marks_sent": 0, "send_errors": 0, "last_error": "", "frames_in": 0, "ws_none_drops": 0}
         self.done = asyncio.Event()
         self.status_history: list[str] = []
@@ -220,7 +221,8 @@ class CallSession:
         self.stt = self.stt_factory()
         self.hub.fusion.stt_busy = lambda: bool(getattr(self.stt, "busy", False))
         await self.stt.start()
-        self._tasks.append(asyncio.create_task(self._pump_stt(), name="stt-pump"))
+        self._pump = asyncio.create_task(self._pump_stt(), name="stt-pump")
+        self._tasks.append(self._pump)
         self.hub.feed_status({"CallStatus": "in-progress"})        # media stream start == answered
 
     async def _pump_stt(self) -> None:
@@ -228,11 +230,27 @@ class CallSession:
         async for text, final in self.stt.results():
             self.hub.feed_transcript(text, final)
 
+    async def _flush_stt(self) -> None:
+        """Far end hung up: finish transcribing what it said last (e.g. 'mailbox is full') and let detection
+        classify it BEFORE we conclude it was a plain hangup."""
+        if not self.stt or self._stt_flushed:
+            return
+        self._stt_flushed = True
+        try:
+            await asyncio.wait_for(self.stt.close(), 10)
+            if getattr(self, "_pump", None):
+                await asyncio.wait_for(asyncio.shield(self._pump), 3)
+            await asyncio.wait_for(self.hub.drain(), 5)
+        except Exception:
+            log.debug("stt flush incomplete", exc_info=True)
+
     async def _shutdown(self) -> None:
         if self.ctl.state not in (State.ENDED, State.HUMAN) and self.hub.running:
+            await self._flush_stt()
             self.hub.feed_status({"CallStatus": "completed"})      # stream closed == far end hung up
             await self.hub.drain()
-        if self.stt and self.ctl.state is not State.HUMAN:         # human: brain takes the stream (stage 2)
+        if self.stt and self.ctl.state is not State.HUMAN and not self._stt_flushed:   # human: brain takes the stream
+            self._stt_flushed = True
             await self.stt.close()
         for t in self._tasks:
             t.cancel()

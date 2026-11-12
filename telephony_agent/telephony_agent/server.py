@@ -170,6 +170,8 @@ def create_app(settings: Settings | None = None, *, stt_factory: Callable[[], ST
             return {"ok": True}
         sess.status_history.append(form.get("CallStatus", ""))
         sess.call_sid = sess.call_sid or form.get("CallSid")
+        if (form.get("CallStatus") or "").lower() == "completed" and sess.ctl.state not in (State.ENDED, State.HUMAN):
+            await sess._flush_stt()              # classify the far end's last words before calling it a hangup
         sess.hub.feed_status(form)
         await sess.settle()
         _record(call_id)
