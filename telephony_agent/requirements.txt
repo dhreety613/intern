@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+httpx
+numpy
+python-multipart      # Twilio webhooks are form posts
+python-dotenv
+onnxruntime
+# silero-vad is installed separately WITHOUT deps (its torch dependency is huge and unused here):
+#     pip install --no-deps silero-vad
+google-cloud-speech   # only used when STT_ENGINE=google
+# dev / tests
+pytest
+pytest-asyncio
+espeakng-loader       # test-audio synthesis only

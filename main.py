@@ -57,6 +57,17 @@ except Exception as e:
 
 
 
+# telephony_agent: pre-human call layer (detectors -> fusion -> controller). Isolated like open_agent so a
+# missing env var / dependency there can never take down the rest of this app. Needs PUBLIC_BASE_URL set to
+# https://<this host>/telephony-agent (Twilio webhooks + media websocket are built from it).
+try:
+    from telephony_agent.telephony_agent.main import app as telephony_app
+    app_telephony = telephony_app
+except Exception as e:
+    logging.getLogger(__name__).error(f"telephony_agent failed to load, skipping: {e}")
+    app_telephony = None
+
+
 class ScrapeRequest(BaseModel):
     website: str
 
@@ -74,6 +85,9 @@ app.include_router(
     call_agent_router,
     prefix="/call-agent"
 )
+
+if app_telephony is not None:
+    app.mount("/telephony-agent", app_telephony)
 
 if open_agent_router is not None:
     app.include_router(

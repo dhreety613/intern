@@ -43,3 +43,7 @@ httpx==0.28.1
 # pipecat.pipeline.worker, pipecat.workers.runner) works fine without it.
 pipecat-ai[google,elevenlabs,silero,websocket]==1.11.0
 aiohttp
+
+# telephony_agent (Silero ONNX model is bundled in the repo, so the silero-vad package/torch is not needed)
+numpy
+onnxruntime

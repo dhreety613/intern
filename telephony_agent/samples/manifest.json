@@ -1,0 +1,325 @@
+{
+ "note": "synthetic samples; see tools/make_samples.py",
+ "samples": [
+  {
+   "file": "01_voicemail_beep.wav",
+   "description": "Voicemail greeting, then a beep. No Twilio AMD verdict: our own transcript + beep detection must trigger the message.",
+   "duration_s": 10.5,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 8.67,
+     "type": "text",
+     "text": "Hi, you've reached John Smith. I can't come to the phone right now. Please leave a message after the tone.",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "answered",
+     "vm_greeting",
+     "vm_beep_ready"
+    ],
+    "never": [
+     "human"
+    ],
+    "outcome": "voicemail_left",
+    "actions": [
+     "Speak",
+     "Hangup"
+    ]
+   }
+  },
+  {
+   "file": "02_voicemail_mailbox_full.wav",
+   "description": "Voicemail that cannot take messages. Must hang up WITHOUT leaving a message.",
+   "duration_s": 6.9,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 6.36,
+     "type": "text",
+     "text": "The mailbox is full and cannot accept any messages at this time. Goodbye.",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "mailbox"
+    ],
+    "never": [
+     "vm_beep_ready",
+     "human"
+    ],
+    "outcome": "voicemail_full"
+   }
+  },
+  {
+   "file": "03_personal_greeting_then_voicemail.wav",
+   "description": "Hard case: personal greeting that STARTS like a person ('Hi, this is John') before it becomes a voicemail. Must NOT be treated as a human.",
+   "duration_s": 10.9,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 2.78,
+     "type": "text",
+     "text": "Hi, this is John Smith.",
+     "final": true
+    },
+    {
+     "t": 5.03,
+     "type": "text",
+     "text": "I'm not available right now.",
+     "final": true
+    },
+    {
+     "t": 9.03,
+     "type": "text",
+     "text": "Please leave a message after the beep and I will get back to you.",
+     "final": true
+    },
+    {
+     "t": 8.53,
+     "type": "amd",
+     "answered_by": "machine_start"
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "vm_greeting",
+     "vm_beep_ready"
+    ],
+    "never": [
+     "human"
+    ],
+    "outcome": "voicemail_left"
+   }
+  },
+  {
+   "file": "04_ivr_menu.wav",
+   "description": "Phone menu. Must wait for the menu to finish, then press 2 (calibration).",
+   "duration_s": 13.0,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 10.52,
+     "type": "text",
+     "text": "Thank you for calling Acme Instruments. For sales, press 1. For calibration services, press 2. For billing, press 3.",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "ivr_menu_ready"
+    ],
+    "never": [
+     "human"
+    ],
+    "actions": [
+     "Dtmf:2"
+    ]
+   }
+  },
+  {
+   "file": "05_ivr_operator_fallback.wav",
+   "description": "Menu with no useful option, repeated. No human option: must press 0 for the operator.",
+   "duration_s": 34.4,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 8.97,
+     "type": "text",
+     "text": "For hours and location, press 1. For directions, press 2. Press 0 at any time to reach the operator.",
+     "final": true
+    },
+    {
+     "t": 20.45,
+     "type": "text",
+     "text": "For hours and location, press 1. For directions, press 2. Press 0 at any time to reach the operator.",
+     "final": true
+    },
+    {
+     "t": 31.92,
+     "type": "text",
+     "text": "For hours and location, press 1. For directions, press 2. Press 0 at any time to reach the operator.",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "ivr_menu_ready"
+    ],
+    "actions": [
+     "Dtmf:0"
+    ]
+   }
+  },
+  {
+   "file": "06_hold_music_then_human.wav",
+   "description": "'Please hold', 8s of music, then a person. Must stay silent through hold, hand off only when the person speaks.",
+   "duration_s": 16.7,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 3.42,
+     "type": "text",
+     "text": "Please hold while we connect your call.",
+     "final": true
+    },
+    {
+     "t": 14.71,
+     "type": "text",
+     "text": "Hi, this is Maria. How can I help you?",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "hold",
+     "human"
+    ],
+    "outcome": "human_confirmed"
+   }
+  },
+  {
+   "file": "07_call_screening.wav",
+   "description": "Call-screening prompt. Must state our name after the beep, wait through 'hold on', then confirm the person.",
+   "duration_s": 18.6,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 7.26,
+     "type": "text",
+     "text": "Hi. The person you are calling is using a screening service. Please say your name after the tone.",
+     "final": true
+    },
+    {
+     "t": 12.78,
+     "type": "text",
+     "text": "Hold on while I try to connect you.",
+     "final": true
+    },
+    {
+     "t": 16.61,
+     "type": "text",
+     "text": "Hello?",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "screen_prompt",
+     "screen_speak_ready",
+     "hold",
+     "human"
+    ],
+    "outcome": "human_confirmed",
+    "actions": [
+     "Speak"
+    ]
+   }
+  },
+  {
+   "file": "08_carrier_not_in_service.wav",
+   "description": "Carrier recording. Must hang up and tag the number as invalid.",
+   "duration_s": 7.9,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 7.36,
+     "type": "text",
+     "text": "We're sorry. The number you have dialed is not in service. Please check the number and dial again.",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "carrier"
+    ],
+    "outcome": "invalid_number",
+    "never": [
+     "human",
+     "vm_beep_ready"
+    ]
+   }
+  },
+  {
+   "file": "09_busy_tone.wav",
+   "description": "Busy signal (480+620 Hz, 0.5s on/off). Must be recognised from the audio alone, with no transcript.",
+   "duration_s": 5.3,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "busy_tone"
+    ],
+    "outcome": "busy"
+   }
+  },
+  {
+   "file": "10_human_hello.wav",
+   "description": "A person answers 'Hello?' and waits. Must confirm a human after they finish and go quiet (not while talking).",
+   "duration_s": 4.7,
+   "events": [
+    {
+     "t": 0.0,
+     "type": "status",
+     "status": "in-progress"
+    },
+    {
+     "t": 2.23,
+     "type": "text",
+     "text": "Hello?",
+     "final": true
+    }
+   ],
+   "expect": {
+    "verdicts": [
+     "human"
+    ],
+    "outcome": "human_confirmed",
+    "never": [
+     "vm_greeting",
+     "ivr_menu_ready"
+    ]
+   }
+  }
+ ]
+}
