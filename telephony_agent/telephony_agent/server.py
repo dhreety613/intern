@@ -68,7 +68,9 @@ def create_app(settings: Settings | None = None, *, stt_factory: Callable[[], ST
                                 "retryable": sess.outcome.retryable if sess.outcome else None,
                                 "state": sess.ctl.state.value, "log": sess.ctl.log, "signals": sess.hub.signal_log,
                                 "heard": sess.ctl.heard,
-                                "status_history": sess.status_history}
+                                "status_history": sess.status_history, "stats": sess.stats,
+                                "stt": {"busy": getattr(sess.stt, "busy", None), "inflight": getattr(sess.stt, "_inflight", None),
+                                        "type": type(sess.stt).__name__}}
 
     async def _deliver(call_id: str) -> None:
         """End-of-call outcome for the tags agent (n8n): same CALL_RESULT_WEBHOOK_URL / _SECRET as call_agent."""

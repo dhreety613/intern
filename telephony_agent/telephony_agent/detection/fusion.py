@@ -306,7 +306,7 @@ class Fusion:
                 repeat = any(len(toks & m) / max(1, len(toks | m)) >= 0.8 for m in self.menus)
                 self.menus.append(toks)
                 from ..ivr import parse_options
-                self._emit(VK.IVR_MENU_READY, 0.9, ["menu_settled"], text=text, options=parse_options(text), repeat=repeat)
+                self._emit(VK.IVR_MENU_READY, 0.9, ["menu_settled"], text=text, options=parse_options(text), repeat=repeat, stt_busy=self.stt_busy())
             elif not self.ivr_buf and self.music_on and now - self.music_since >= s.music_hold_s \
                     and not self._words_recent(5.0):
                 self.phase, self.hold_sent = "hold", True

@@ -48,6 +48,7 @@ class CallSession:
         self._send_lock = asyncio.Lock()
         self._mark_n = 0
         self._out_q: asyncio.Queue = asyncio.Queue()
+        self.stats = {"frames_sent": 0, "marks_sent": 0, "send_errors": 0, "last_error": "", "frames_in": 0, "ws_none_drops": 0}
         self.done = asyncio.Event()
         self.status_history: list[str] = []
 
@@ -149,14 +150,20 @@ class CallSession:
             if nxt < now - 0.1:
                 nxt = now                                      # fell behind / was idle: restart the clock
             try:
+                if self.ws is None:
+                    self.stats["ws_none_drops"] += 1
                 if kind == "media":
+                    self.stats["frames_sent"] += 1
                     await self._send_json({"event": "media", "streamSid": self.stream_sid,
                                            "media": {"payload": base64.b64encode(val).decode()}})
                     nxt += TICK_FRAME_S
                     await asyncio.sleep(max(0.0, nxt - loop.time()))
                 else:
+                    self.stats["marks_sent"] += 1
                     await self._send_json({"event": "mark", "streamSid": self.stream_sid, "mark": {"name": val}})
-            except Exception:
+            except Exception as e:
+                self.stats["send_errors"] += 1
+                self.stats["last_error"] = f"{type(e).__name__}: {e}"[:200]
                 log.exception("audio sender error")
 
     # ------------------------------------------------------------ websocket
@@ -172,6 +179,7 @@ class CallSession:
                     m = msg["media"]
                     if m.get("track", "inbound") == "inbound":
                         audio = base64.b64decode(m["payload"])
+                        self.stats["frames_in"] += 1
                         if self.stt:
                             self.stt.feed(audio)
                         self.hub.feed_audio(audio)

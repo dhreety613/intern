@@ -180,7 +180,7 @@ class CallController:
             human, how = validate_llm_pick("human", pick[1], opts), "llm"
         if human is None:
             human = choose_key(opts, self.targets)           # rules: also catches a route the LLM missed
-        self._note(t, "ivr_menu", options=[(o.key, o.desc) for o in opts], pick=pick, via=how,
+        self._note(t, "ivr_menu", text=text[-160:], stt_busy=v.data.get("stt_busy"), options=[(o.key, o.desc) for o in opts], pick=pick, via=how,
                    chose=human.key if human else None)
         if human:
             self.retries = 0
