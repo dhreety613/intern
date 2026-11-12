@@ -186,6 +186,7 @@ class CallSession:
         if not self.hub.running:
             self.hub.start()
         self.stt = self.stt_factory()
+        self.hub.fusion.stt_busy = lambda: bool(getattr(self.stt, "busy", False))
         await self.stt.start()
         self._tasks.append(asyncio.create_task(self._pump_stt(), name="stt-pump"))
         self.hub.feed_status({"CallStatus": "in-progress"})        # media stream start == answered

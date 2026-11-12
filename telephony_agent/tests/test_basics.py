@@ -84,3 +84,13 @@ def test_customer_service_is_not_the_parts_service_team():
     from telephony_agent.ivr import choose_key, parse_options
     o = parse_options("For customer service and billing, press 1. For quality assurance, press 2.")
     assert choose_key(o).key == "2"
+
+
+def test_tail_fragment_please_press_zero_is_option_zero():
+    from telephony_agent.ivr import parse_options
+    assert [(o.key, o.desc) for o in parse_options("For all other inquiries, please press zero")] == [("0", "all other inquiries")]
+
+
+def test_dtmf_tone_level_matches_call_agent():
+    pcm = mulaw_decode(dtmf_mulaw("5", tone_ms=100, gap_ms=0))
+    assert 12000 < int(abs(pcm).max()) <= 16200      # two tones of 8000 each

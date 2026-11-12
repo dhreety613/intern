@@ -11,7 +11,7 @@ _KEYMAP = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five
 # style A: "press 1 for sales"      style B: "for sales, press 1"
 _A = re.compile(rf"(?:press|dial|enter)\s+(?P<k>{_KEY})\s*(?:now\s+)?,?\s*(?:for|to|if)\s+(?P<d>[^,.;]+)")
 _A2 = re.compile(rf"(?:^|,|\bor\b|\band\b)\s*(?P<k>\d|star|pound)\s+(?:for|to)\s+(?P<d>[^,.;]+)")
-_B = re.compile(rf"(?:for|to|if)\s+(?P<d>[^,.;]+?)\s*,?\s*(?:press|dial|enter)\s+(?P<k>{_KEY})\b")
+_B = re.compile(rf"(?:for|to|if)\s+(?P<d>[^,.;]+?)\s*,?\s*(?:please\s+)?(?:press|dial|enter)\s+(?P<k>{_KEY})\b")
 _ZERO_ANYTIME = re.compile(r"(?:press|dial)\s+(?:zero|0)\b")
 
 # intent ranking: earlier = better. Matched against option description.

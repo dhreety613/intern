@@ -34,7 +34,7 @@ _DTMF = {
 }
 
 
-def dtmf_mulaw(digits: str, tone_ms=250, gap_ms=120, amp=9000) -> bytes:
+def dtmf_mulaw(digits: str, tone_ms=250, gap_ms=120, amp=8000) -> bytes:   # amp per tone, as call_agent/app/dtmf.py
     """In-band DTMF as mu-law. 'w' = 500 ms pause. Sent over the media stream so the WS stays up."""
     out = []
     for d in digits.upper():
@@ -45,7 +45,7 @@ def dtmf_mulaw(digits: str, tone_ms=250, gap_ms=120, amp=9000) -> bytes:
             continue
         lo, hi = _DTMF[d]
         t = np.arange(int(SR * tone_ms / 1000)) / SR
-        tone = amp * (np.sin(2 * np.pi * lo * t) + np.sin(2 * np.pi * hi * t)) / 2
+        tone = amp * (np.sin(2 * np.pi * lo * t) + np.sin(2 * np.pi * hi * t))
         out.append(tone.astype(np.int16))
         out.append(np.zeros(int(SR * gap_ms / 1000), dtype=np.int16))
     return mulaw_encode(np.concatenate(out)) if out else b""

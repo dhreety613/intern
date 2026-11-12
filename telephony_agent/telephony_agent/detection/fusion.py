@@ -55,6 +55,7 @@ class Fusion:
         self.hold_sent = False
         self.dead_sent = False
         self.out: list[Verdict] = []
+        self.stt_busy = lambda: False     # set by the session: True while speech is still being transcribed
 
     # ---------------------------------------------------------------- api
     def on_signal(self, sig: Signal) -> list[Verdict]:
@@ -298,7 +299,7 @@ class Fusion:
                 return
 
         if self.phase == "ivr":
-            if self.ivr_buf and self._quiet_for() >= s.ivr_settle_s:
+            if self.ivr_buf and self._quiet_for() >= s.ivr_settle_s and (not self.stt_busy() or self._quiet_for() >= s.ivr_settle_s + 4.0):
                 text = " ".join(self.ivr_buf)
                 self.ivr_buf = []
                 toks = _tokens(text)

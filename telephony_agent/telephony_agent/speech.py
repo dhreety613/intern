@@ -110,6 +110,12 @@ class ElevenLabsScribeSTT:
         self._seg = bytearray()
         self._voiced = self._quiet = 0    # ms
         self._in_speech = False
+        self._inflight = 0                # segments queued or being transcribed
+
+    @property
+    def busy(self) -> bool:
+        """Speech heard but its text has not arrived yet (utterance open, or segment in flight)."""
+        return self._in_speech or self._inflight > 0
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._worker(), name="scribe-stt")
@@ -139,6 +145,7 @@ class ElevenLabsScribeSTT:
             self._quiet += 20
         if self._quiet >= self.HANGOVER_MS or len(self._seg) // 8 >= self.MAX_SEGMENT_MS:
             if self._voiced >= self.MIN_SPEECH_MS:
+                self._inflight += 1
                 self._segs.put_nowait(bytes(self._seg))
             self._seg.clear()
             self._pre.clear()
@@ -153,6 +160,7 @@ class ElevenLabsScribeSTT:
 
     async def close(self) -> None:
         if self._in_speech and self._voiced >= self.MIN_SPEECH_MS:
+            self._inflight += 1
             self._segs.put_nowait(bytes(self._seg))
         self._segs.put_nowait(None)
         if self._task:
@@ -168,9 +176,10 @@ class ElevenLabsScribeSTT:
                 text = await self._transcribe(seg)
             except Exception:
                 log.exception("scribe transcription failed")
-                continue
+                text = ""
             if text:
                 self._out.put_nowait((text, True))
+            self._inflight -= 1
 
     async def _transcribe(self, mulaw: bytes) -> str:
         r = await self._http.post(
