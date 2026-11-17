@@ -508,6 +508,8 @@ class TwilioMediaStream:
         logger.info(f"Decision Task: {decision_task}")
         self._say("Anne", response_text)
         self._track("DECISION", task=decision_task, call_ended=call_ended)
+        if result.get("restarted"):
+            self._track("NEW_PERSON_RESTART", note="new person on the line: greeted again, workflow restarted")
 
         # Store the decision task for timeout tracking
         self.last_agent_task = decision_task
@@ -591,6 +593,8 @@ class TwilioMediaStream:
         logger.info(f"Decision Task (late): {decision_task}")
         self._say("Anne", response_text)
         self._track("DECISION", task=decision_task, call_ended=call_ended, late=True)
+        if result.get("restarted"):
+            self._track("NEW_PERSON_RESTART", note="new person on the line: greeted again, workflow restarted", late=True)
         self.last_agent_task = decision_task
 
         if response_text:
@@ -608,6 +612,8 @@ class TwilioMediaStream:
 
     def _start_wait_timeout(self):
         """Start a 90-second timeout for WAIT state."""
+        if self._call_ended:
+            return
         self.wait_started_at = datetime.now()
         logger.info(f"WAIT started at {self.wait_started_at} - will timeout in {self.wait_timeout_seconds}s")
 

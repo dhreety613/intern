@@ -76,3 +76,15 @@ class CallState(TypedDict, total=False):
     # --------------------------------------------------
 
     human_confirmed: bool
+
+    # --------------------------------------------------
+    # New-person handling + reminder/offer bookkeeping
+    # --------------------------------------------------
+
+    # Set when the speaker said they would fetch / transfer to someone else:
+    # the NEXT speaker is probably a different person (greet + restart).
+    awaiting_new_person: bool
+
+    # The calibration reminder (and, in the same turn, the guidance offer)
+    # has been spoken.
+    reminder_delivered: bool

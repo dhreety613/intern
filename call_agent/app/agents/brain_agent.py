@@ -9,7 +9,6 @@ from call_agent.app.graph.state import CallState
 from call_agent.app.schemas.brain import BrainOutput
 
 
-#GEMINI_API_KEY = "AQ.Ab8RN6I9yLXUZOZMRIng4P0x8BNevM0_EERqN-u7pIw-2rFPJw"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("GEMINI_API_KEY is not set.")

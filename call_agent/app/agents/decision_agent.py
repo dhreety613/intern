@@ -9,7 +9,6 @@ from call_agent.app.graph.state import CallState
 from call_agent.app.schemas.decision import DecisionOutput
 
 
-#GEMINI_API_KEY = "AQ.Ab8RN6KrXmpFDNu8kFHZ5FZAK2u1qSDLLzib09I-Z4UsG8oX2A"
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
@@ -144,6 +143,10 @@ def decision_agent(
         "guidance_phase",
         "none"
     )
+
+    # Set when the previous speaker said they would fetch / transfer to
+    # someone else (see OTHER PERSON in the prompt).
+    awaiting_new_person = bool(state.get("awaiting_new_person", False))
 
     # ========================================================
     # CONTEXT
@@ -387,11 +390,12 @@ def decision_agent(
 You are Anne from Tensitron, on a phone call. Reply to the customer's CURRENT message.
 
 WORKFLOW: name → email → phone → calibration → complete.
-(After "complete", a separate non-LLM system offers and runs the calibration-form walkthrough - see GUIDANCE PHASE.)
+(The calibration-form guidance offer is made in the SAME reply as the reminder; a separate system then handles the customer's answer and the walkthrough - see GUIDANCE PHASE.)
 
 PROGRESS: {json.dumps(brain_progress)}
 CURRENT STAGE: {current_stage}
 GUIDANCE PHASE: {guidance_phase}
+AWAITING A NEW PERSON (the previous speaker said they would fetch someone): {awaiting_new_person}
 CUSTOMER SAID: {user_message}
 RECENT CONTEXT: {json.dumps(context)}
 
@@ -426,14 +430,11 @@ CALIBRATION:
 Give the reminder with BOTH serial number(s) and date (the list above holds serial numbers, not product names):
 'And I would just like to remind you that your calibration for the Tensitron meter with serial number [serial] is due on [date].'
 Several serials: 'the Tensitron meters with serial numbers [A], [B] and [C] are due on [date]'. Several dates: pair each serial with its date. No serial on record: 'your Tensitron meter calibration is due on [date]'.
-Say serials exactly as given. Don't ask if the date works or imply a commitment. Then wait; don't end the call.
-Once the customer acknowledges, calibration_completed becomes TRUE and your very next reply is the GUIDANCE OFFER below, not "you're welcome"/"anything else".
+Say serials exactly as given. Don't ask if the date works or imply a commitment. Don't end the call.
+In the SAME reply as the reminder, straight after it, also ask exactly: "Would you like some guidance on how to fill out the calibration form?" Set reminder_given = TRUE and present_task = WAIT. Do NOT wait for an acknowledgement of the reminder before offering.
+A separate system handles the customer's answer to that offer and the whole walkthrough; you never see those turns.
 
-GUIDANCE OFFER: when CURRENT STAGE is "complete" AND GUIDANCE PHASE is "none", your ENTIRE response is exactly:
-"Would you like some guidance on how to fill out the calibration form?"  present_task = WAIT.
-A non-LLM system handles everything after (their answer and the walkthrough); you never see those turns.
-
-AFTER WORKFLOW: only when GUIDANCE PHASE is "done" (never while "none"), ask: "Is there anything else I can help you with today?" and wait.
+AFTER WORKFLOW: only when GUIDANCE PHASE is "done", ask: "Is there anything else I can help you with today?" and wait.
 
 GUARDRAILS:
 Only handle: calibration dates/reminders, name/email/phone confirmation or correction, calibration reminder emails, contact-update emails.
@@ -451,7 +452,9 @@ NOT guidance requests: price questions, changing contact details, asking for a p
 
 DIVERSION: briefly steer off-topic talk back to the call purpose; after ~3 consecutive diversions be firm; after ~10 consecutive random interactions, END_CALL.
 
-OTHER PERSON: if someone else answers and will fetch the customer, WAIT; don't confirm the customer's details with them; when the customer comes on, reintroduce yourself. If the customer is unavailable/busy, WAIT or END_CALL as fits.
+OTHER PERSON: if the speaker says they will get / transfer / hand the phone to someone else ("hold on, let me get him"), set will_fetch_person = TRUE, present_task = WAIT, and say you'll hold; don't confirm any details with them.
+A NEW PERSON JOINED when the voice now speaking is clearly a different person from before: AWAITING A NEW PERSON is true and this message reads like a fresh pick-up ("hello?", "yes this is Jim", "who's this?"), OR someone else takes over ("this is his colleague", "I'm his wife, he's out, but I can help", a transfer). Then set new_person_joined = TRUE (the system will greet them again from the top, so your response is ignored). If AWAITING is true but the message is clearly the SAME previous speaker talking again ("one second", "he's coming"), keep new_person_joined FALSE and WAIT.
+If the customer is unavailable/busy, WAIT or END_CALL as fits.
 
 CALL ENDING: finishing the workflow does NOT end the call. END_CALL only when the customer is clearly finished/says goodbye/has nothing else, is unavailable/wrong person, or the random-conversation limit is hit.
 
@@ -464,6 +467,9 @@ Return ONLY JSON:
   "random_conversation": false,
   "redirect_to_rep": false,
   "guidance_requested": false,
+  "reminder_given": false,
+  "will_fetch_person": false,
+  "new_person_joined": false,
   "redirect_reason": ""
 }}
 """

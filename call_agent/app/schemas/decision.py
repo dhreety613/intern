@@ -70,3 +70,30 @@ class DecisionOutput(BaseModel):
             "actually was."
         )
     )
+
+    reminder_given: bool = Field(
+        default=False,
+        description=(
+            "True when this reply delivers the calibration reminder "
+            "(serial number(s) + date). The orchestrator then makes sure "
+            "the form-guidance offer is part of the SAME spoken turn."
+        )
+    )
+
+    will_fetch_person: bool = Field(
+        default=False,
+        description=(
+            "True when the speaker says they will get / transfer / hand the "
+            "phone to someone else (e.g. 'hold on, let me get him')."
+        )
+    )
+
+    new_person_joined: bool = Field(
+        default=False,
+        description=(
+            "True when the person speaking NOW is a different person from "
+            "whoever was speaking before (someone was fetched, the phone was "
+            "handed over, a colleague/family member took over). The "
+            "orchestrator then greets again and restarts the workflow."
+        )
+    )

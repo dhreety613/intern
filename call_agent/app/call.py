@@ -1,6 +1,9 @@
 from typing import Any, Dict, List
 
+from call_agent.app.agents.brain_agent import get_next_stage
 from call_agent.app.agents.calibration_guide import (
+    OFFER_QUESTION,
+    TIMEOUT_SENTINEL,
     handle_guidance_turn,
     start_walkthrough,
 )
@@ -66,6 +69,66 @@ class CallSession:
         }
 
     # ========================================================
+    # NEW PERSON JOINED
+    # ========================================================
+
+    def _restart_conversation(self):
+        """Someone new is on the line: forget everything the previous person
+        said and start the workflow again from the top. Only the customer
+        record and a do-not-call request survive (that one is always honoured)."""
+        keep_dnc = bool((self.state.get("memory") or {}).get("do_not_call"))
+        self.state.update({
+            "conversation": [],
+            "context": [],
+            "memory": {"do_not_call": True} if keep_dnc else {},
+            "progress": {
+                "name_confirmed": False,
+                "email_confirmed": False,
+                "phone_confirmed": False,
+                "calibration_completed": False,
+            },
+            "current_stage": "name_confirmation",
+            "guidance_phase": "none",
+            "guidance_step_idx": 0,
+            "reminder_delivered": False,
+            "awaiting_new_person": False,
+            "brain_output": {},
+            "decision": {},
+            "call_progress": {
+                "topic_diversion_count": 0,
+                "random_conversation_count": 0,
+            },
+            "call_ended": False,
+            "human_confirmed": False,
+        })
+
+    def _new_person_turn(self) -> Dict[str, Any]:
+        """Greet again (scripted opening) with the workflow restarted."""
+        self._restart_conversation()
+        greeting = opening_message(self.state["customer_name"])
+        self.add_message("assistant", greeting)
+        decision = {
+            "response": greeting,
+            "present_task": "CONTINUE",
+            "needs_context": False,
+            "topic_diversion": False,
+            "random_conversation": False,
+            "redirect_to_rep": False,
+            "redirect_reason": "",
+        }
+        self.state["decision"] = decision
+        return {
+            "response": greeting,
+            "decision": decision,
+            "brain": {},
+            "progress": self.state["progress"],
+            "memory": self.state["memory"],
+            "current_stage": self.state["current_stage"],
+            "call_ended": False,
+            "restarted": True,
+        }
+
+    # ========================================================
     # ADD MESSAGE
     # ========================================================
 
@@ -107,6 +170,7 @@ class CallSession:
     ) -> Dict[str, Any]:
 
         self.state["user_message"] = user_message
+        is_timeout = (user_message or "").strip() == TIMEOUT_SENTINEL
 
         # IMPORTANT:
         # Customer message enters conversation BEFORE
@@ -118,42 +182,48 @@ class CallSession:
 
         guidance_phase = self.state.get("guidance_phase", "none")
 
-        # Once the calibration-guidance offer has actually been made,
-        # everything through the end of the walkthrough is handled
-        # deterministically (no Gemini) - see calibration_guide.py's
-        # module docstring for why. The graph is only re-entered once
-        # this sub-flow reports "done".
+        # Once the calibration-guidance offer has been made, the offer's
+        # answer and the walkthrough are run by calibration_guide.py: the
+        # LLM words each step, code owns the step counter (no skipping, no
+        # invented steps). The normal graph is only re-entered when this
+        # sub-flow reports "done" - or when the customer asked for
+        # something else (run_graph), e.g. "no thanks, and please use a
+        # different number".
         if guidance_phase in ("offered", "walking"):
             guidance_result = handle_guidance_turn(
                 guidance_phase,
                 self.state.get("guidance_step_idx", 0),
                 user_message,
+                self.state["conversation"][:-1],
             )
 
             self.state["guidance_phase"] = guidance_result["phase"]
             self.state["guidance_step_idx"] = guidance_result["step_idx"]
 
-            response = guidance_result["response"]
-            if response:
-                self.add_message("assistant", response)
+            if not guidance_result.get("run_graph"):
+                response = guidance_result["response"]
+                if response:
+                    self.add_message("assistant", response)
 
-            return {
-                "response": response,
-                "decision": {
+                return {
                     "response": response,
-                    "present_task": guidance_result["present_task"],
-                    "needs_context": False,
-                    "topic_diversion": False,
-                    "random_conversation": False,
-                    "redirect_to_rep": False,
-                    "redirect_reason": "",
-                },
-                "brain": self.state.get("brain_output", {}),
-                "progress": self.state.get("progress", {}),
-                "memory": self.state.get("memory", {}),
-                "current_stage": self.state.get("current_stage", ""),
-                "call_ended": guidance_result["call_ended"],
-            }
+                    "decision": {
+                        "response": response,
+                        "present_task": guidance_result["present_task"],
+                        "needs_context": False,
+                        "topic_diversion": False,
+                        "random_conversation": False,
+                        "redirect_to_rep": False,
+                        "redirect_reason": "",
+                    },
+                    "brain": self.state.get("brain_output", {}),
+                    "progress": self.state.get("progress", {}),
+                    "memory": self.state.get("memory", {}),
+                    "current_stage": self.state.get("current_stage", ""),
+                    "call_ended": guidance_result["call_ended"],
+                }
+
+            guidance_phase = guidance_result["phase"]      # "done": the side request goes through the normal graph
 
         result = call_graph.invoke(
             self.state
@@ -161,6 +231,19 @@ class CallSession:
 
         # Update persistent session state
         self.state.update(result)
+
+        decision = result.get(
+            "decision",
+            {}
+        )
+
+        # Someone new is speaking (a person was fetched / the phone was
+        # handed over): greet again and restart the whole workflow.
+        if decision.get("new_person_joined") and not is_timeout:
+            return self._new_person_turn()
+        # The speaker said they will get someone: the next speaker is
+        # probably that someone (the Decision prompt is told so).
+        self.state["awaiting_new_person"] = bool(decision.get("will_fetch_person"))
 
         # A person has answered the name question (or the flow has moved
         # past it): the person has engaged with the conversation.
@@ -171,17 +254,13 @@ class CallSession:
         ):
             self.state["human_confirmed"] = True
 
-        decision = result.get(
-            "decision",
-            {}
-        )
-
         # The Decision agent flagged a request for form guidance (like it
-        # flags END_CALL): the orchestrator drops Gemini's reply and
-        # switches to the scripted walkthrough from step 1.
+        # flags END_CALL): the orchestrator replaces Gemini's reply with the
+        # start of the walkthrough (step 1, worded by the LLM from the step
+        # data, validated).
         guidance_switched = False
         if decision.get("guidance_requested") and guidance_phase != "walking":
-            walk = start_walkthrough()
+            walk = start_walkthrough(self.state["conversation"][:-1])
             decision = {
                 **decision,
                 "response": walk["response"],
@@ -196,6 +275,39 @@ class CallSession:
             self.state["guidance_step_idx"] = walk["step_idx"]
             guidance_switched = True
 
+        # The calibration reminder was just spoken: the guidance offer
+        # belongs in the SAME turn, not a separate one afterwards. The model
+        # is asked to include it; this guarantees it either way. The
+        # reminder counts as delivered now, and the customer's next reply is
+        # the answer to the offer (handled by calibration_guide.py).
+        if (
+            not guidance_switched
+            and guidance_phase == "none"
+            and not self.state.get("reminder_delivered")
+            and decision.get("present_task") != "END_CALL"
+            and not decision.get("redirect_to_rep")
+        ):
+            spoken = str(decision.get("response", ""))
+            low = spoken.lower()
+            gave_reminder = bool(decision.get("reminder_given")) or (
+                self.state.get("current_stage") == "calibration"
+                and "calibration" in low
+                and "due" in low
+            )
+            if gave_reminder:
+                if "guidance" not in low:
+                    spoken = f"{spoken.rstrip()} {OFFER_QUESTION}"
+                decision = {**decision, "response": spoken, "present_task": "WAIT"}
+                result = {**result, "decision": decision}
+                self.state["decision"] = decision
+                self.state["reminder_delivered"] = True
+                self.state["guidance_phase"] = "offered"
+                self.state["guidance_step_idx"] = 0
+                progress = dict(self.state.get("progress") or {})
+                progress["calibration_completed"] = True
+                self.state["progress"] = progress
+                self.state["current_stage"] = get_next_stage(progress)
+
         response = decision.get(
             "response",
             ""
@@ -208,17 +320,6 @@ class CallSession:
                 "assistant",
                 response
             )
-
-        # The Gemini graph just asked the calibration-guidance offer
-        # question this turn (CURRENT STAGE reached "complete" with
-        # GUIDANCE PHASE still "none" going in) - from the next customer
-        # reply onward, the deterministic branch above takes over.
-        if (
-            not guidance_switched
-            and guidance_phase == "none"
-            and self.state.get("progress", {}).get("calibration_completed")
-        ):
-            self.state["guidance_phase"] = "offered"
 
         return {
 
@@ -235,7 +336,7 @@ class CallSession:
                 ),
 
             "progress":
-                result.get(
+                self.state.get(
                     "progress",
                     {}
                 ),
@@ -250,12 +351,9 @@ class CallSession:
                 ),
 
             "current_stage":
-                result.get(
+                self.state.get(
                     "current_stage",
-                    self.state.get(
-                        "current_stage",
-                        ""
-                    )
+                    ""
                 ),
 
             "call_ended":
