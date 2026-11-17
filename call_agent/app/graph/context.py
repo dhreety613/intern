@@ -3,7 +3,7 @@ from typing import Any, Dict, List
 
 def get_recent_context(
     conversation: List[Dict[str, str]],
-    limit: int = 5,
+    limit: int = 12,
 ) -> List[Dict[str, str]]:
 
     if not conversation:

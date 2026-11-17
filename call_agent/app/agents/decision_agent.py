@@ -5,6 +5,8 @@ import os
 
 from google import genai
 
+from call_agent.app.agents.llm_util import generate, make_client
+
 from call_agent.app.graph.state import CallState
 from call_agent.app.schemas.decision import DecisionOutput
 
@@ -29,9 +31,7 @@ GUARDRAIL_SUPPORT_PHONE = "+17022301616"
 
 
 def get_client():
-    return genai.Client(
-        api_key=GEMINI_API_KEY
-    )
+    return make_client(GEMINI_API_KEY)
 
 
 def extract_json(text: str) -> Dict[str, Any]:
@@ -419,6 +419,20 @@ END_CALL = customer clearly wants to end, is unavailable/wrong person, or prolon
 
 Use the current message first; use recent context for short answers; if still unclear, CLARIFY.
 
+HOW TO CONVERSE (applies at EVERY stage, including after the workflow is complete):
+- You are a capable, attentive assistant, not a script reader. Work out what the customer ACTUALLY said (it is a speech transcript: it can contain filler, a word in another language, or small errors) and answer THAT first, in natural spoken English, using the whole conversation.
+- If the customer asks for something, handle that request properly BEFORE anything else. If you need a detail to do it, ask one specific question for it.
+- Never repeat your previous reply or a stock phrase. If you would say the same thing again, say something that moves the conversation forward (usually a specific question).
+- If you did not understand, say so briefly and ask a precise question. Never answer with empty filler like "Understood" or "I've noted that" unless you actually did something.
+- Only say you have noted/updated a detail when its value is already in MEMORY above or the customer's CURRENT message just gave it. Otherwise ask for it.
+
+CONTACT DETAILS CAN CHANGE AT ANY TIME (even after the workflow is complete): "use another number", "my email changed", "call me on ...", "that's not my name":
+- If they have NOT yet given the new value, ask for it directly, e.g. "Sure, what number would you like me to use from now on?"
+- When the current message (or MEMORY) gives the value, read it back clearly (digits in small groups) and ask them to confirm it. Once they confirm, tell them it is updated.
+- Reading back an EMAIL: repeat it EXACTLY as the customer said it. Never drop, add or change any part ("dhreety dot test at gmail dot com" is dhreety.test@gmail.com, NOT dhreety@gmail.com). Say "dot" and "at" aloud, and spell the part before the @ letter by letter if it is unusual, so they can catch a mistake.
+- Reading back a PHONE NUMBER: say every digit they gave, in small groups, with nothing added or missing.
+- While such a change is still unresolved, do NOT ask "anything else" and do NOT end the call.
+
 WORKFLOW RULES:
 - Follow the first unfinished stage; never restart a TRUE stage. Progress above is authoritative.
 - Handle corrections naturally (Memory stores them).
@@ -434,10 +448,10 @@ Say serials exactly as given. Don't ask if the date works or imply a commitment.
 In the SAME reply as the reminder, straight after it, also ask exactly: "Would you like some guidance on how to fill out the calibration form?" Set reminder_given = TRUE and present_task = WAIT. Do NOT wait for an acknowledgement of the reminder before offering.
 A separate system handles the customer's answer to that offer and the whole walkthrough; you never see those turns.
 
-AFTER WORKFLOW: only when GUIDANCE PHASE is "done", ask: "Is there anything else I can help you with today?" and wait.
+AFTER WORKFLOW (GUIDANCE PHASE is "done"): you are in open conversation. Deal with whatever the customer says or asks. Only once their last request is fully resolved, ask in your own words whether there is anything else you can help with, and wait.
 
 GUARDRAILS:
-Only handle: calibration dates/reminders, name/email/phone confirmation or correction, calibration reminder emails, contact-update emails.
+Only handle: calibration dates/reminders, name/email/phone confirmation, correction or change of contact details, callback timing, calibration reminder emails, contact-update emails.
 No pricing, product specs, availability, technical support, commitments or invented info. For out-of-scope requests don't say "someone will get back to you"; say in one reply:
 "I'm sorry, I can't help with that on this call. Please contact {GUARDRAIL_SUPPORT_EMAIL} or {GUARDRAIL_SUPPORT_PHONE} for that. Would you like me to redirect this call to a representative now?"
 present_task = WAIT until they answer. One out-of-scope request does not end the call.
@@ -474,7 +488,8 @@ Return ONLY JSON:
 }}
 """
 
-    response = client.models.generate_content(
+    response = generate(
+        client,
         model=MODEL,
         contents=prompt,
         config={

@@ -113,10 +113,10 @@ _ALL = GUIDE_STEPS + [CLOSING]           # index len(GUIDE_STEPS) is the closing
 # --------------------------------------------------------------------- LLM
 def llm_json(prompt: str) -> Dict[str, Any]:
     """One JSON-returning Gemini call. Tests replace this function."""
-    from google import genai
+    from call_agent.app.agents.llm_util import generate, make_client
 
-    client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-    resp = client.models.generate_content(model=MODEL, contents=prompt, config={"response_mime_type": "application/json"})
+    client = make_client(os.getenv("GEMINI_API_KEY"))
+    resp = generate(client, model=MODEL, contents=prompt, config={"response_mime_type": "application/json"})
     text = (resp.text or "").strip()
     if text.startswith("```"):
         text = text.strip("`")

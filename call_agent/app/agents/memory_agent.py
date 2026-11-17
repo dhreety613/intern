@@ -6,6 +6,8 @@ from datetime import date
 
 from google import genai
 
+from call_agent.app.agents.llm_util import generate, make_client
+
 from call_agent.app.graph.state import CallState
 from call_agent.app.schemas.memory import CallMemory
 
@@ -17,9 +19,7 @@ MODEL = "gemini-3.5-flash-lite"
 
 
 def get_client():
-    return genai.Client(
-        api_key=GEMINI_API_KEY
-    )
+    return make_client(GEMINI_API_KEY)
 
 
 def extract_json(text: str) -> Dict[str, Any]:
@@ -180,7 +180,8 @@ Return ONLY JSON matching this schema:
 }}
 """
 
-    response = client.models.generate_content(
+    response = generate(
+        client,
         model=MODEL,
         contents=prompt,
         config={
