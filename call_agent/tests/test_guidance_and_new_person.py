@@ -258,3 +258,16 @@ def test_silence_never_triggers_a_restart(monkeypatch):
                                       "decision": {"response": "Are you still there?", "present_task": "WAIT", "new_person_joined": True}})
     out = s.process(cg.TIMEOUT_SENTINEL)
     assert not out.get("restarted") and out["response"] == "Are you still there?"
+
+
+def test_acknowledgement_is_kept_when_the_customer_confirms_something_and_asks_for_the_guide(monkeypatch, llm):
+    """Live call: 'Yes that's right. And now can you guide me ...' - the walkthrough replaced the whole reply, so the
+    confirmation was never acknowledged."""
+    s, _ = make_session(monkeypatch, {"progress": prog(calibration_completed=True), "current_stage": "complete",
+                                      "decision": {"response": "Great, your email is updated. Sure, I can walk you through it.",
+                                                   "present_task": "CONTINUE", "guidance_requested": True}})
+    llm["answers"].append({"response": "Open a browser and go to tensitron dot com, and tell me when you're there."})
+    out = s.process("Yes, that's right. And now can you please guide me on how to fill the calibration form?")
+    assert out["response"].startswith("Great, your email is updated.") and "tensitron dot com" in out["response"]
+    assert "walk you through" not in out["response"]
+    assert s.state["guidance_phase"] == "walking" and s.state["guidance_step_idx"] == 0

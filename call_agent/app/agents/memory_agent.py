@@ -7,6 +7,7 @@ from datetime import date
 from google import genai
 
 from call_agent.app.agents.llm_util import generate, make_client
+from call_agent.app.agents.contact_format import normalize_email, normalize_phone
 
 from call_agent.app.graph.state import CallState
 from call_agent.app.schemas.memory import CallMemory
@@ -142,6 +143,7 @@ You are the memory extractor for a Tensitron call. Merge the current customer me
 RULES:
 - Keep previous values unless explicitly changed; keep established true flags unless explicitly reversed. Later corrections overwrite earlier new_* values.
 - Corrected name/email/phone → new_name / new_email / new_phone_number.
+- Store new_phone_number as digits with a leading + if they gave a country code (e.g. +919040232322) and new_email as a lowercase address (e.g. dhreety@outlook.com): convert spoken words ("nine zero four" → 904, "at" → @, "dot" → .), join spelled-out letters ("D-H-R-E-E-T-Y" → dhreety). If the customer left the domain ending off but Anne read it back with one ("outlook dot com"), use Anne's ending (see CONTEXT).
 - Store explicitly mentioned calibration dates/information.
 - Calibration email request → email_calibration_confirmation=true. Contact-update email request → email_crm_update_confirmation=true.
 - "Don't call again"/"stop calling"/"remove me" → do_not_call=true (never true otherwise).
@@ -219,6 +221,12 @@ Return ONLY JSON matching this schema:
         except ValueError:
             ncd = None
     memory_dict["next_call_date"] = ncd
+
+    # Contact details the customer gave by voice: store them in CRM form, whatever the model returned.
+    if memory_dict.get("new_phone_number"):
+        memory_dict["new_phone_number"] = normalize_phone(memory_dict["new_phone_number"])
+    if memory_dict.get("new_email"):
+        memory_dict["new_email"] = normalize_email(memory_dict["new_email"])
 
     return {
         "memory": memory_dict

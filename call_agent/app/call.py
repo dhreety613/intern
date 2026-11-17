@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, List
 
 from call_agent.app.agents.brain_agent import get_next_stage
@@ -261,9 +262,16 @@ class CallSession:
         guidance_switched = False
         if decision.get("guidance_requested") and guidance_phase != "walking":
             walk = start_walkthrough(self.state["conversation"][:-1])
+            # Keep anything the model acknowledged in the same reply ("Great, your email is updated.") and
+            # replace only the walkthrough sentence itself.
+            ack = " ".join(
+                part.strip()
+                for part in re.split(r"(?<=[.!?])\s+", str(decision.get("response", "")))
+                if part.strip() and not any(k in part.lower() for k in ("walk you through", "guide you", "guidance"))
+            )
             decision = {
                 **decision,
-                "response": walk["response"],
+                "response": (ack + " " + walk["response"]).strip(),
                 "present_task": walk["present_task"],
                 "redirect_to_rep": False,
                 "redirect_reason": "",
