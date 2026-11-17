@@ -66,13 +66,15 @@ Misc
 
 KNOWN NOTES / FOLLOW-UPS
 ------------------------
-- Local, NOT pushed: per-call ring_timeout_s on POST /calls (models.py, dialer.py, server.py, main.py build marker ivr-fix-7).
+- per-call ring_timeout_s on POST /calls is committed and deployed (build ivr-fix-8); item 2 above can be run now.
+- Branch integrate-telephony-brain: human handoff -> brain on the same websocket (build brain-handoff-1), brain stripped of
+  all voicemail/IVR/AMD/DTMF handling. Unit-tested only; NOT yet tested on a live call, NOT deployed.
 - User's iPhone carrier forwards unanswered calls to voicemail at ~11-24 s; RING_TIMEOUT_S default is 25 s (voicemail
   answered at 24 s once) -> consider raising RING_TIMEOUT_S to ~40 on Render.
 - Declining a call on that carrier is "answered then dropped after ~3 s", not a Twilio busy status. Optional heuristic:
   answered + no speech + hangup < 5 s => treat as declined/busy. Not implemented; decide later.
 - Scribe STT adds ~1-2 s lag before text-based decisions; consider streaming STT for stage 2 (brain replies).
-- Handoff to brain is still the stub (log, hold 6 s, hang up). Stage 2 (reason codes: hold / transfer to IVR / voicemail /
-  transfer to rep, re-run detection, fresh greeting) is not built.
+- Handoff to the brain is wired (see above). Stage 2 (brain hands off BACK mid-call with a reason code: hold / transfer to IVR /
+  voicemail / transfer to rep, detection re-armed, fresh greeting) is not built.
 - Render redeploys wipe in-memory call records; do not push while a test call is running.
 - "Anne" TTS voice id default is call_agent's (Rachel); confirm ELEVENLABS_VOICE_ID on Render is the intended voice.

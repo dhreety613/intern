@@ -4,12 +4,8 @@ from call_agent.app.agents.calibration_guide import (
     handle_guidance_turn,
     start_walkthrough,
 )
-from call_agent.app.agents.ivr_agent import LLM_IVR, looks_like_ivr
-from call_agent.app.agents.voicemail_agent import (
-    VOICEMAIL_MESSAGE,
-    looks_like_voicemail,
-)
-from call_agent.app.graph.graph import call_graph, start_graph
+from call_agent.app.graph.graph import call_graph
+from call_agent.app.greeting import opening_message
 
 
 class CallSession:
@@ -65,33 +61,9 @@ class CallSession:
 
             "call_ended": False,
 
-            # Voicemail phrase check runs only until this turns True.
+            # True once the person has engaged (name confirmed / past stage 1).
             "human_confirmed": False,
         }
-
-    def _restart_conversation(self):
-        """Reset everything except customer data and IVR bookkeeping."""
-        self.state.update({
-            "conversation": [],
-            "context": [],
-            "memory": {},
-            "progress": {
-                "name_confirmed": False,
-                "email_confirmed": False,
-                "phone_confirmed": False,
-                "calibration_completed": False,
-            },
-            "current_stage": "name_confirmation",
-            "guidance_phase": "none",
-            "guidance_step_idx": 0,
-            "brain_output": {},
-            "call_progress": {
-                "topic_diversion_count": 0,
-                "random_conversation_count": 0,
-            },
-            "call_ended": False,
-            "human_confirmed": True,  # a human joined after the IVR
-        })
 
     # ========================================================
     # ADD MESSAGE
@@ -112,20 +84,11 @@ class CallSession:
     # START CALL
     # ========================================================
 
-    def start(self, answered_by: str = "") -> str:
-        """Run the pre-greeting graph: voicemail -> fixed message + end
-        call, otherwise Anne's normal opening."""
+    def start(self) -> str:
+        """Anne's scripted opening line. Only confirmed humans reach the
+        brain, so there is nothing to screen here."""
 
-        result = start_graph.invoke({
-            "customer_name": self.state["customer_name"],
-            "answered_by": answered_by,
-        })
-
-        opening = result["decision"]["response"]
-
-        if result.get("is_voicemail"):
-            self.state["call_ended"] = True
-            self.state["is_voicemail"] = True
+        opening = opening_message(self.state["customer_name"])
 
         self.add_message(
             "assistant",
@@ -144,36 +107,6 @@ class CallSession:
     ) -> Dict[str, Any]:
 
         self.state["user_message"] = user_message
-
-        # Voicemail phrase check - only until a human is confirmed. IVR menus
-        # say "to leave a message, press 2": that is a menu, not a greeting.
-        if (
-            not LLM_IVR  # 2026-10-29: with LLM_IVR on, the IVR agent decides voicemail vs menu vs person
-            and not self.state.get("human_confirmed")
-            and looks_like_voicemail(user_message)
-            and not looks_like_ivr(user_message)
-        ):
-            self.add_message("user", user_message)
-            self.add_message("assistant", VOICEMAIL_MESSAGE)
-            self.state["call_ended"] = True
-            self.state["is_voicemail"] = True
-            return {
-                "response": VOICEMAIL_MESSAGE,
-                "decision": {
-                    "response": VOICEMAIL_MESSAGE,
-                    "present_task": "END_CALL",
-                    "needs_context": False,
-                    "topic_diversion": False,
-                    "random_conversation": False,
-                    "redirect_to_rep": False,
-                    "redirect_reason": "",
-                },
-                "brain": self.state.get("brain_output", {}),
-                "progress": self.state.get("progress", {}),
-                "memory": self.state.get("memory", {}),
-                "current_stage": self.state.get("current_stage", ""),
-                "call_ended": True,
-            }
 
         # IMPORTANT:
         # Customer message enters conversation BEFORE
@@ -229,19 +162,8 @@ class CallSession:
         # Update persistent session state
         self.state.update(result)
 
-        # A human joined after the IVR menu: forget the menu chatter and
-        # restart the whole workflow from the beginning. The response
-        # below is then the scripted opening.
-        if result.get("ivr_result", {}).get("action") == "restart":
-            self._restart_conversation()
-
-        # The IVR agent heard a recorded mailbox greeting (Cherokee Brick, 2026-10-29):
-        # flag voicemail so the stream waits for the beep before the fixed message.
-        if result.get("ivr_result", {}).get("voicemail_greeting"):
-            self.state["is_voicemail"] = True
-
         # A person has answered the name question (or the flow has moved
-        # past it): stop looking for voicemail phrases.
+        # past it): the person has engaged with the conversation.
         if (
             self.state.get("progress", {}).get("name_confirmed")
             or self.state.get("current_stage", "name_confirmation")

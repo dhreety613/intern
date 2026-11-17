@@ -10,12 +10,6 @@ from call_agent.app.graph.fast_path import fast_brain_update
 from call_agent.app.agents.memory_agent import memory_agent
 from call_agent.app.agents.brain_agent import brain_agent
 from call_agent.app.agents.decision_agent import decision_agent
-from call_agent.app.greeting import opening_message
-from call_agent.app.agents.ivr_agent import ivr_agent, ivr_respond
-from call_agent.app.agents.voicemail_agent import (
-    is_machine_answer,
-    voicemail_agent,
-)
 
 
 logger = logging.getLogger(__name__)
@@ -190,25 +184,16 @@ def finalize_call(
 
 
 # ============================================================
-# IVR ROUTING
+# ROUTING
+#
+# Only confirmed humans reach the brain (the telephony layer handles
+# IVRs, voicemail, hold, screening...), so every customer turn goes
+# straight to the normal workflow.
 # ============================================================
 
-def route_after_ivr_check(
+def route_at_start(
     state: CallState,
 ):
-
-    result = state.get("ivr_result", {})
-
-    # Pressed a voicemail option and now hear the greeting: fixed line.
-    if result.get("action") == "voicemail":
-        return ["voicemail_agent"]
-
-    if result.get("is_ivr") or result.get("action") == "restart":
-        return ["ivr_respond"]
-
-    # ORIGINAL (before the 2026-10-15 latency fast path) - revert by
-    # restoring this line and deleting the block below:
-    # return ["memory", "brain"]
 
     # Trivial confirming turn ("yes", "uh-huh", ...): Brain is predictable
     # and Memory has nothing to extract, so skip both LLM calls.
@@ -253,19 +238,6 @@ def build_graph():
         finalize_call
     )
 
-    # IVR layer: every customer turn is first checked for an automated
-    # phone menu. If it is one, Anne presses keys silently (ivr_respond)
-    # instead of running the normal Memory/Brain/Decision workflow.
-    graph.add_node(
-        "ivr_check",
-        ivr_agent
-    )
-
-    graph.add_node(
-        "ivr_respond",
-        ivr_respond
-    )
-
     # --------------------------------------------------------
     # IMPORTANT DEPENDENCY
     #
@@ -274,31 +246,10 @@ def build_graph():
     # Brain MUST finish before Decision starts.
     # --------------------------------------------------------
 
-    graph.add_edge(
-        START,
-        "ivr_check"
-    )
-
     graph.add_conditional_edges(
-        "ivr_check",
-        route_after_ivr_check,
-        # ORIGINAL: ["memory", "brain", "ivr_respond", "voicemail_agent"]
-        ["memory", "brain", "brain_fast", "ivr_respond", "voicemail_agent"],
-    )
-
-    graph.add_node(
-        "voicemail_agent",
-        voicemail_agent
-    )
-
-    graph.add_edge(
-        "voicemail_agent",
-        "finalize"
-    )
-
-    graph.add_edge(
-        "ivr_respond",
-        "finalize"
+        START,
+        route_at_start,
+        ["memory", "brain", "brain_fast"],
     )
 
     graph.add_edge(
@@ -336,70 +287,3 @@ def build_graph():
 
 
 call_graph = build_graph()
-
-
-# ============================================================
-# START GRAPH (runs once, before the greeting)
-#
-# START -> voicemail_check -+-> voicemail_agent -> END   (machine)
-#                           +-> greeting -------> END   (human)
-# ============================================================
-
-def voicemail_check(
-    state: CallState,
-) -> Dict[str, Any]:
-
-    return {
-        "is_voicemail": is_machine_answer(
-            state.get("answered_by", "")
-        )
-    }
-
-
-def route_after_voicemail_check(
-    state: CallState,
-) -> str:
-
-    return "voicemail_agent" if state.get("is_voicemail") else "greeting"
-
-
-def greeting(
-    state: CallState,
-) -> Dict[str, Any]:
-
-    opening = opening_message(state.get("customer_name", ""))
-
-    return {
-        "decision": {
-            "response": opening,
-            "present_task": "CONTINUE",
-        },
-        "call_ended": False,
-    }
-
-
-def build_start_graph():
-
-    graph = StateGraph(
-        CallState
-    )
-
-    graph.add_node("voicemail_check", voicemail_check)
-    graph.add_node("voicemail_agent", voicemail_agent)
-    graph.add_node("greeting", greeting)
-
-    graph.add_edge(START, "voicemail_check")
-
-    graph.add_conditional_edges(
-        "voicemail_check",
-        route_after_voicemail_check,
-        ["voicemail_agent", "greeting"],
-    )
-
-    graph.add_edge("voicemail_agent", END)
-    graph.add_edge("greeting", END)
-
-    return graph.compile()
-
-
-start_graph = build_start_graph()

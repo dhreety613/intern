@@ -22,23 +22,17 @@ def build_call_result(
     deal_id: str = "",
 ) -> Dict[str, Any]:
     memory = state.get("memory") or {}
-    ivr = state.get("ivr") or {}
 
     human = bool(state.get("human_confirmed"))
-    voicemail = bool(state.get("is_voicemail"))
     wrong_number = bool(memory.get("wrong_number_so_avoid"))
 
     # A call counts as successful only if a real person was reached and it
-    # was the right person. Voicemail, IVR dead-ends, no answer and wrong
-    # numbers are not successful.
-    if voicemail:
-        outcome = "voicemail"
-    elif wrong_number:
+    # was the right person. Calls that never reach a person (voicemail, IVR
+    # dead-ends, no answer...) are reported by the telephony layer, not here.
+    if wrong_number:
         outcome = "wrong_number"
     elif human:
         outcome = "completed"
-    elif ivr.get("seen"):
-        outcome = "ivr_no_human"
     else:
         outcome = "no_conversation"
     successful = outcome == "completed"
