@@ -204,14 +204,23 @@ class TwilioMediaStream:
         self._transcript.append(f"{role}: {text}")
         self._track("TURN", speaker=role, text=text)
 
-    async def handle(self):
+    async def handle(self, preamble=None):
         """
         Main WebSocket message loop.
+
+        `preamble` is a list of Twilio-shaped events processed before the socket is read. The telephony
+        layer uses it to hand an already-answered, already-streaming call over mid-call: it replays a
+        synthetic "start" event (stream/call sid + customParameters) and this handler carries on from the
+        same websocket, with no redirect and no audio gap.
         """
+        pending = list(preamble or [])
         try:
             while True:
-                message = await self.websocket.receive_text()
-                data = json.loads(message)
+                if pending:
+                    data = pending.pop(0)
+                else:
+                    message = await self.websocket.receive_text()
+                    data = json.loads(message)
 
                 event = data.get("event")
 

@@ -52,6 +52,7 @@ class CallSession:
         self.stats = {"frames_sent": 0, "marks_sent": 0, "send_errors": 0, "last_error": "", "frames_in": 0, "ws_none_drops": 0}
         self.done = asyncio.Event()
         self.status_history: list[str] = []
+        self.handed_off = False          # set by the server's handoff hook: the brain takes over the live websocket
 
     def now(self) -> float:
         return time.monotonic() - self._t0
@@ -172,6 +173,8 @@ class CallSession:
         self.ws = ws
         try:
             while True:
+                if self.handed_off:                          # human confirmed: stop reading, the brain owns the socket now
+                    break
                 msg = json.loads(await ws.receive_text())
                 ev = msg.get("event")
                 if ev == "start":
@@ -195,11 +198,28 @@ class CallSession:
             if type(e).__name__ not in ("WebSocketDisconnect", "ConnectionClosed"):
                 log.exception("media loop error")
         finally:
+            if self.handed_off:
+                await self._release_for_brain()
+                return
             if self.now() < self._reconnect_until and self.ctl.state not in (State.ENDED, State.HUMAN):
                 self.ws = None                                   # DTMF redirect: Twilio re-opens the stream
                 self._tasks.append(asyncio.create_task(self._reconnect_watchdog(), name="reconnect-watchdog"))
             else:
                 await self._shutdown()
+
+    async def _release_for_brain(self) -> None:
+        """A human is confirmed and the brain is about to read this same websocket: stop our own audio plumbing
+        (paced sender, STT pump, controller ticker, detectors) but leave the socket open."""
+        for t in self._tasks:
+            t.cancel()
+        if self.stt and not self._stt_flushed:
+            self._stt_flushed = True
+            try:
+                await asyncio.wait_for(self.stt.close(), 5)
+            except Exception:
+                log.debug("stt close on handoff incomplete", exc_info=True)
+        await self.hub.stop()
+        self.done.set()
 
     async def _reconnect_watchdog(self) -> None:
         await asyncio.sleep(max(0.0, self._reconnect_until - self.now()) + 0.2)

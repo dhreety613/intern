@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import uuid
-from typing import Callable
+from typing import Awaitable, Callable
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
@@ -39,9 +39,15 @@ def twilio_signature(auth_token: str, url: str, params: dict) -> str:
     return base64.b64encode(hmac.new(auth_token.encode(), data.encode(), hashlib.sha1).digest()).decode()
 
 
+BrainRunner = Callable[[WebSocket, CallSession], Awaitable[None]]
+
+
 def create_app(settings: Settings | None = None, *, stt_factory: Callable[[], STT], tts: TTS,
                llm: LlmFallback | None = None, http: httpx.AsyncClient | None = None,
-               validate_signatures: bool | None = None, api_key: str | None = None) -> FastAPI:
+               validate_signatures: bool | None = None, api_key: str | None = None,
+               brain_runner: BrainRunner | None = None) -> FastAPI:
+    """brain_runner(ws, session): runs the brain on the live media websocket once a human is confirmed.
+    None -> the handoff stays a stub (log, hold, hang up)."""
     s = settings or Settings()
     app = FastAPI(title="telephony-agent")
     sessions: dict[str, CallSession] = {}
@@ -115,6 +121,12 @@ def create_app(settings: Settings | None = None, *, stt_factory: Callable[[], ST
         bg.add(t)
         t.add_done_callback(bg.discard)
 
+    async def _handoff_to_brain(sess: CallSession, action: HandoffToBrain) -> None:
+        """Human confirmed: flag the session so its media loop stops reading and releases the websocket; the
+        /media route then runs the brain on that same socket (no redirect, no audio gap)."""
+        log.info("HANDOFF -> brain call=%s sid=%s heard=%s", sess.req.call_id, sess.call_sid, action.transcript_so_far)
+        sess.handed_off = True
+
     async def verify(request: Request, x_twilio_signature: str = Header(default="")) -> dict:
         form = dict((await request.form()).items())
         if validate:
@@ -136,7 +148,7 @@ def create_app(settings: Settings | None = None, *, stt_factory: Callable[[], ST
         req = CallRequest(to=body.to, call_id=uuid.uuid4().hex[:12], extension=body.extension, context=body.context,
                           ring_timeout_s=body.ring_timeout_s)
         sess = CallSession(req, s, stt_factory=stt_factory, tts=tts, hangup=_hangup, send_dtmf=_dtmf_fn(req.call_id), llm=llm,
-                           on_handoff=_handoff_stub)
+                           on_handoff=_handoff_to_brain if brain_runner else _handoff_stub)
         sessions[req.call_id] = sess
         await sess.start()                       # detectors run from dial time (status/AMD arrive without audio)
         res = await dialer.place_call(req, s, http)
@@ -204,6 +216,20 @@ def create_app(settings: Settings | None = None, *, stt_factory: Callable[[], ST
         await ws.accept()
         await sess.run_media(ws)
         _record(call_id)
+        if sess.handed_off and brain_runner:
+            # the brain delivers its own end-of-call result (this layer only reports calls that never reach a human)
+            try:
+                await brain_runner(ws, sess)
+            except Exception:
+                log.exception("brain failed on call=%s", call_id)
+                if sess.call_sid:
+                    try:
+                        await _hangup(sess.call_sid)
+                    except Exception:
+                        log.exception("hangup after brain failure failed")
+            finally:
+                _record(call_id)
+            return
         if sess.ws is None and sess.outcome:        # stream really closed (not a DTMF reconnect)
             await _deliver(call_id)
 
