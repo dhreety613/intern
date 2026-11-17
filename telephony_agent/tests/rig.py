@@ -4,7 +4,7 @@ from telephony_agent.controller import CallController
 from telephony_agent.detection.events import AmdDetector, ProgressDetector, TextDetector
 from telephony_agent.detection.fusion import Fusion
 from telephony_agent.detection.signals import Sig, Signal
-from telephony_agent.models import AnsweredBy, CallRequest, SpeechDone, Tick
+from telephony_agent.models import AnsweredBy, CallRequest, Dtmf, SpeechDone, Tick
 
 
 class Rig:
@@ -26,6 +26,8 @@ class Rig:
             self.verdicts.append(v)
             acts += self.c.handle(v)
         self.out += acts
+        if any(isinstance(a, Dtmf) for a in acts):
+            self.f.key_pressed(self.t)             # what CallSession._press does
         return acts
 
     def sig(self, kind: Sig, conf=1.0, **data):

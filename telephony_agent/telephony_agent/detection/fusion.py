@@ -54,6 +54,7 @@ class Fusion:
         self.screen_t = 0.0
         self.hold_sent = False
         self.dead_sent = False
+        self.pressed = False             # a key was pressed in an IVR: later evidence is about a NEW far end
         self.out: list[Verdict] = []
         self.stt_busy = lambda: False     # set by the session: True while speech is still being transcribed
 
@@ -68,6 +69,19 @@ class Fusion:
             h(sig)
         self._timers()
         return self.out
+
+    def key_pressed(self, t: float) -> None:
+        """A DTMF key was pressed in an IVR. Whatever answers next is a NEW far end (a person, a mailbox, a queue), so the
+        evidence gathered about the menu no longer applies: its long-monologue rhythm ("machine") and Twilio's AMD
+        verdict (which describes the ORIGINAL answer, the IVR, and can arrive well after the press) must not count
+        against a person who says "Hello?" a few seconds later."""
+        if self.phase in ("done", "human"):
+            return
+        self.pressed = True
+        self.rhythm = None
+        self.cand = None
+        self.ivr_buf.clear()
+        self.last_activity = max(self.last_activity, t)
 
     # ----------------------------------------------------------- helpers
     def _emit(self, kind: VK, conf=1.0, evidence=None, **data) -> None:
@@ -243,9 +257,10 @@ class Fusion:
         else:
             score += 0.5; ev.append("text:human_phrase")
         neg = False
-        if self.amd is Sig.AMD_HUMAN:
+        amd = None if self.pressed else self.amd          # AMD described the original answer, not what came after a key press
+        if amd is Sig.AMD_HUMAN:
             score += 0.3; ev.append("amd:human")
-        elif self.amd_machine:
+        elif amd in _MACHINE_AMD:
             score -= 0.6 if c["words"] > 3 else 0.2; ev.append("amd:machine"); neg = True
         if self.rhythm:
             kind, conf = self.rhythm

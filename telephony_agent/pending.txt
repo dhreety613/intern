@@ -52,7 +52,10 @@ IVR extras
 [ ] 21. "Invalid entry" re-prompt   -> retry / fallback ladder
 [ ] 22. Extension prompt  (with and without "extension" in the request)
 [ ] 23. Menu repeats after a key press -> fallback
-[ ] 24. IVR press -> live person answers -> human confirmed (restart detection after menu)
+[~] 24. IVR press -> live person answers -> human confirmed (restart detection after menu)
+        LIVE 2026-11-17 (call 7ab906e55fd5): FAILED - menu parsed, key 5 pressed, a person said Hello? 4x, never confirmed, Anne silent.
+        Cause: the menu's long-monologue rhythm and Twilio's late AMD machine_end_other still counted against the person.
+        Fixed: Fusion.key_pressed() drops that evidence on every key press (+ 3 regression tests). NEEDS a live re-test.
 [ ] 25. Speech IVR ("say representative")
 [ ] 26. Multi-level IVR (second menu after the first key)
 

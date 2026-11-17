@@ -112,6 +112,7 @@ class CallSession:
                 log.info("HANDOFF call=%s (stub; stage 2 wires the brain)", self.req.call_id)
 
     async def _press(self, digits: str) -> None:
+        self.hub.fusion.key_pressed(self.now())      # what answers next is a new far end: drop the menu's evidence
         if self.s.dtmf_mode == "twilio" and self._send_dtmf and self.call_sid:
             self._reconnect_until = self.now() + self.s.reconnect_window_s
             self._gap_from = self.now()
