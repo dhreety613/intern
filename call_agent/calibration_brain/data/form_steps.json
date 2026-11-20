@@ -1,0 +1,11 @@
+[
+  {"id": "s1", "title": "Open tensitron.com", "instruction": "Ask them to open a web browser and go to tensitron.com (say it as 'tensitron dot com'), and to tell you once they are there."},
+  {"id": "s2", "title": "Find the menu bar", "instruction": "On the homepage, ask them to look toward the upper part of the page for the menu bar."},
+  {"id": "s3", "title": "Calibration and Service", "instruction": "From the menu bar, ask them to click Calibration and Service, and to tell you when that page comes up."},
+  {"id": "s4", "title": "Open the form", "instruction": "They should see the Calibration or Service Form option on that page; ask them to click it."},
+  {"id": "s5", "title": "Important note, then Start", "instruction": "When the form opens, ask them to read the important note, then click Start."},
+  {"id": "s6", "title": "Process and pricing, then Next", "instruction": "Next they see the process and pricing information. Ask them to read through it, then click Next. Do not discuss the pricing itself."},
+  {"id": "s7", "title": "Important Service Notes, then Next", "instruction": "Next they see the Important Service Notes. Ask them to make sure to read it, then click Next."},
+  {"id": "s8", "title": "Acknowledge the Service Notes", "instruction": "They should see an option to acknowledge the Service Notes. Ask them to click Yes to confirm."},
+  {"id": "s9", "title": "Fill out and submit", "instruction": "Then they can fill out the form and submit it. Once submitted, Tensitron will have their information and will be expecting their meter, so remind them to send it in. For later questions they can email service@tensitron.com or call 720-230-1616."}
+]

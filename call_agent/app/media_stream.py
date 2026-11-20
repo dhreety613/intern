@@ -278,13 +278,34 @@ class TwilioMediaStream:
         if products:
             products_list = [p.strip() for p in products.split(",") if p.strip()]
 
-        self.session = CallSession(
-            customer_name=customer_name or "Customer",
-            email=email or "",
-            phone_number=phone_number or "",
-            calibration_dates=dates_list,
-            products=products_list,
-        )
+        if os.getenv("ANNE_BRAIN", "new").lower() != "old":
+            # NEW conversation brain (call_agent/calibration_brain). ANNE_BRAIN=old = instant rollback to the graph.
+            from call_agent.app.brain_session import BrainSession
+            self.session = BrainSession(
+                customer_name=customer_name or "Customer",
+                email=email or "",
+                phone_number=phone_number or "",
+                calibration_dates=dates_list,
+                products=products_list,
+                heard=getattr(self, "heard_before_handoff", ""),
+            )
+            # warmer voice: same voice / model family as the "Anne Tensitron v3" ElevenLabs agent
+            self.tts.voice_id = os.getenv("ANNE_VOICE_ID", "ys3XeJJA4ArWMhRpcX1D")
+            self.tts.model_id = os.getenv("ANNE_VOICE_MODEL", "eleven_v3")
+            self.tts.voice_settings = {
+                "stability": float(os.getenv("ANNE_VOICE_STABILITY", "0.5")),
+                "similarity_boost": float(os.getenv("ANNE_VOICE_SIMILARITY", "0.6")),
+            }
+            self._track("BRAIN", engine="new", model=self.session.cfg.gemini_model, voice=self.tts.voice_id)
+        else:
+            self.session = CallSession(
+                customer_name=customer_name or "Customer",
+                email=email or "",
+                phone_number=phone_number or "",
+                calibration_dates=dates_list,
+                products=products_list,
+            )
+            self._track("BRAIN", engine="old")
 
         logger.info(
             f"Stream started: sid={self.stream_sid} call={self.call_sid} "
@@ -736,7 +757,7 @@ class TwilioMediaStream:
 
     async def _send_opening_greeting(self):
         """Send Anne's opening greeting to caller."""
-        greeting = self.session.start()
+        greeting = await asyncio.to_thread(self.session.start)   # the new brain makes an LLM call here
         logger.info(f"Anne (greeting): {greeting}")
         self._say("Anne", greeting)
         await self._stream_tts_to_twilio(greeting)

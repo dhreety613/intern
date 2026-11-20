@@ -96,14 +96,14 @@ CLOSING = {
     "instruction": (
         "Tell them: once they submit it, Tensitron will have their information and will be expecting their meter, so "
         "please remember to send it in. If any questions come up later they can email service at tensitron dot com or "
-        "call seven-zero-two, two-three-zero, one-six-one-six."
+        "call seven-two-zero, two-three-zero, one-six-one-six."
     ),
-    "must_say": ["service at tensitron dot com", "seven-zero-two", "two-three-zero", "one-six-one-six"],
+    "must_say": ["service at tensitron dot com", "seven-two-zero", "two-three-zero", "one-six-one-six"],
     "markers": ["expecting"],
     "fallback": (
         "After you submit it, we will have your information and we will be expecting your meter. Please remember to "
         "send it to us. If any questions come up later, you can email us at service at tensitron dot com or call us "
-        "at seven-zero-two, two-three-zero, one-six-one-six."
+        "at seven-two-zero, two-three-zero, one-six-one-six."
     ),
 }
 

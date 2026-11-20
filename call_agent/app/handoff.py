@@ -53,5 +53,6 @@ async def run_brain(ws, *, call_id: str, call_sid: str, stream_sid: str, context
         calibration_dates=_as_text(ctx.get("calibration_dates")),
         products=_as_text(ctx.get("products")),
     )
+    handler.heard_before_handoff = " ".join(heard or [])   # e.g. "Hello?" - the brain answers it
     await handler.handle(preamble=[{"event": "connected"},
                                    build_start_event(call_sid=call_sid, stream_sid=stream_sid, context=ctx)])

@@ -31,6 +31,8 @@ def build_call_result(
     # dead-ends, no answer...) are reported by the telephony layer, not here.
     if wrong_number:
         outcome = "wrong_number"
+    elif state.get("brain_outcome") in ("busy_call_back_later", "not_available", "declined_to_talk", "do_not_call"):
+        outcome = state["brain_outcome"]   # new brain: a person answered but the workflow was not completed
     elif human:
         outcome = "completed"
     else:

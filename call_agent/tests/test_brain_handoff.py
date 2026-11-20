@@ -13,6 +13,11 @@ from call_agent.app import handoff, media_stream
 from call_agent.app.greeting import opening_message
 
 
+@pytest.fixture(autouse=True)
+def _old_brain(monkeypatch):
+    monkeypatch.setenv("ANNE_BRAIN", "old")   # these tests drive the old graph with stubs; the new brain has test_brain_session.py
+
+
 def mulaw(level: int, ms: int) -> bytes:
     n = 8 * ms
     pcm = b"".join(struct.pack("<h", int(level * math.sin(i * 0.3))) for i in range(n))
