@@ -199,8 +199,11 @@ def apply_tool(state: CallState, name: str, args: dict) -> ToolResult:
 
     if name == "form_help_answer":
         state.form_help_wanted = bool(a.get("wants_help"))
-        if not state.form_help_wanted:
-            state.form_finished = True
+        # "no" closes the walkthrough, but they may change their mind later ("actually, walk me through it")
+        state.form_finished = not state.form_help_wanted
+        if state.form_help_wanted:
+            state.form_current = None
+            state.form_steps_done.clear()
         return r()
 
     if name == "form_progress":

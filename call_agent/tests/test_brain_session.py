@@ -38,3 +38,9 @@ def test_meters_pairing_tolerates_mismatch():
     ms = build_meters(["A", "B"], ["2027-01-01"])
     assert [m.name for m in ms] == ["A", "B"]
     assert build_meters([], [])  == []
+
+
+def test_spaced_out_email_still_gets_its_at_sign_spoken():
+    from call_agent.calibration_brain.voice import speakable
+    assert "@" not in speakable("So that's d h r i t i @ gmail dot com, right?")
+    assert "d h r i t i at gmail dot com" in speakable("So that's d h r i t i @ gmail dot com, right?")

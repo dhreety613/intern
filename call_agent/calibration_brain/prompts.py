@@ -45,6 +45,7 @@ HOW TO HANDLE REAL CALLS (judgement, not a script: use your own words, adapt to 
 - Contact changed hands ("he doesn't work here anymore", "I handle that now", "put me down as the contact"): that's good news, not a wrong number. Thank them, make them the contact, and collect their name, email and phone. You don't need to ask whether the old person is still the right contact once they've told you otherwise.
 - Contact details: cover name, email and phone, one thing per turn, but flow with the conversation. If they update something out of order or give several at once, take it all in and only ask for what's still missing; go back to anything unconfirmed before moving on. Read back every new or corrected email or phone and get a clear yes. "The number you're calling" / "this number" means keep the phone on file (confirm it and move on).
 - Don't drift into calibration planning, preferences or scheduling while confirming details; a short "I'll make sure the team picks that up" and back on track.
+- Never end the call because something was unclear or garbled (STT mishears, foreign words, noise): ask them to repeat. Only end after they clearly say goodbye / that they're done, or the workflow is finished, and always say a warm goodbye in the same turn as end_call.
 - Whenever they answer whether they want help with the form (yes, no, "not at my computer", "I know how"), record it with form_help_answer BEFORE you say goodbye; the call can't be closed until that is on record. Never invent example numbers, dates or emails.
 - Reminder: deliver it conversationally, in short pieces, not one long block: the meter and due date, that sending it in is simple and takes a few minutes. Then find out if they're at a computer and whether they know the online form; offer to walk them through it. If they're not at a computer or don't want help, point them to the Calibration and Service tab on tensitron.com and wrap up warmly.
 - Walkthrough: one step at a time, then listen. Don't fill silence or keep asking "are you there". Anything like "okay / one second / it's loading / where is that?" means they're following or need help on that step. Vary your phrasing. After the last step, tell them {company} will be expecting their meter and how to reach {support_contact}, and finish.
@@ -112,8 +113,8 @@ def build_system(cfg: Config, st: CallState) -> str:
     else:
         lines.append("(Meter details and on-file contact details are hidden until the speaker is confirmed.)")
 
-    if phase == P_FORM_GUIDE:
-        lines.append("FORM STEPS (use ONLY these; paraphrase naturally, one at a time):")
+    if phase in (P_FORM_GUIDE, P_WRAP) and st.reminder_delivered:
+        lines.append("FORM STEPS (use ONLY these; paraphrase naturally, one at a time). If they ask for help with the form at ANY point, even after saying no earlier, call form_help_answer with wants_help=true and guide them from these:")
         for i, s in enumerate(call.form_steps, 1):
             mark = "done" if s.id in st.form_steps_done else ("current" if s.id == st.form_current else "todo")
             lines.append(f"  {i}. [{s.id}] ({mark}) {s.title}: {s.instruction}")

@@ -195,5 +195,9 @@ class Brain:
         if not spoken_this_turn and not deferred:
             self.history.append(Msg("model", GAP_FILL))
             yield Say(GAP_FILL)
+        if any(a.type == "end_call" for a in deferred) and not spoken_this_turn:
+            bye = "Thanks so much for your time. Take care!"   # never hang up without a goodbye
+            self.history.append(Msg("model", bye))
+            yield Say(bye)
         for a in deferred:
             yield a

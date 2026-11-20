@@ -93,6 +93,7 @@ def speakable(text: str) -> str:
     text = _EMAIL.sub(_email_to_words, text)
     text = _URL.sub(lambda m: f"{m.group(1)} dot {m.group(2)}", text)
     text = _PHONE.sub(_phone_to_words, text)
+    text = re.sub(r"\s*@\s*", " at ", text)   # spaced-out emails the model wrote letter by letter ("d r i t i @ gmail dot com")
     text = text.replace("&", " and ").replace("—", ", ").replace(" - ", ", ")
     return re.sub(r"\s+", " ", text).strip()
 
