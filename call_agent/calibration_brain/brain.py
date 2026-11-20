@@ -112,6 +112,11 @@ class Brain:
 
         speak_only = False
         for rnd in range(self.MAX_ROUNDS):
+            for v in (st.email,):
+                if v:
+                    self.facts.allow_email(v)    # whatever is saved in state may be read back
+            if st.phone:
+                self.facts.allow_phone(st.phone)
             system = build_system(self.cfg, st)
             splitter, calls = SentenceSplitter(), []
             soft_block = None
