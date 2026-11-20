@@ -353,7 +353,7 @@ def trigger_test_call(
     import os
     from twilio.rest import Client
 
-    TEST_TO_NUMBER = "+919040239072"
+    TEST_TO_NUMBER = "+13464876828"
     TEST_FROM_NUMBER = "+18578470611"
 
     account_sid = os.getenv("TWILIO_ACCOUNT_SID")
